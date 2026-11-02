@@ -93,6 +93,12 @@ footer a{color:var(--accent)}
 .umm td{vertical-align:top}
 .umm .reason{color:var(--muted);font-size:12.5px}
 .stale{color:var(--warn)}
+.hctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.hctl input{font:14px var(--f-mono);padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)}
+.seg{display:inline-flex}
+.seg .btn{border-radius:0}.seg .btn:first-child{border-radius:6px 0 0 6px}.seg .btn:last-child{border-radius:0 6px 6px 0;margin-left:-1px}
+.seg .btn[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+#hTiles .val{font-size:24px}
 .util{display:grid;grid-template-columns:minmax(90px,auto) minmax(0,1fr) auto auto;gap:10px 14px;align-items:center}
 .util .nm{font-weight:500}
 .util .sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
@@ -180,6 +186,25 @@ footer a{color:var(--accent)}
   <div class="legend" id="histLegend"></div>
   <div class="chart" id="histChart"><div class="empty">Ei historiadataa</div></div>
   <div style="overflow-x:auto"><table id="histTable"></table></div>
+</section>
+
+<section class="panel" id="history">
+  <div class="head"><h2>Historia</h2><span class="hmeta" id="hMeta">tuntikeskiarvot · Fingrid ja sahkotin.fi</span></div>
+  <div class="hctl">
+    <div class="seg" role="group" aria-label="Näkymä">
+      <button class="btn" type="button" id="hModeDay" aria-pressed="true">Päivä</button>
+      <button class="btn" type="button" id="hModeMonth" aria-pressed="false">Kuukausi</button>
+    </div>
+    <button class="btn" type="button" id="hPrev" aria-label="Edellinen">‹</button>
+    <input type="date" id="hDate" aria-label="Päivämäärä">
+    <input type="month" id="hMonth" aria-label="Kuukausi" hidden>
+    <button class="btn" type="button" id="hNext" aria-label="Seuraava">›</button>
+  </div>
+  <div class="tiles" id="hTiles"></div>
+  <div class="legend" id="hLegend"></div>
+  <div class="chart" id="hMix"><div class="empty">Valitse päivä</div></div>
+  <div class="head"><h2>Spot-hinta</h2><span class="hmeta">€/MWh, alv 0 %</span></div>
+  <div class="chart" id="hPrice"></div>
 </section>
 
 <div class="err" id="err" role="status"></div>
@@ -309,6 +334,14 @@ function frame(el, h, x0, x1, y0, y1, opts={}){
   let g = "";
   for(const v of niceTicks(y0,y1,4)){ g += `<line x1="${L}" x2="${W-R}" y1="${sy(v)}" y2="${sy(v)}" stroke="${css("--grid")}"/><text x="${L-6}" y="${sy(v)+4}" text-anchor="end">${fmt(v, opts.yd||0)}</text>`; }
   const step = (x1-x0) > 36*3600e3 ? 6*3600e3 : 3*3600e3;
+  if(opts.dayTicks){
+    const days=Math.round((x1-x0)/864e5), every=days>20?5:days>10?2:1;
+    for(let d=new Date(x0); +d<=x1; d.setDate(d.getDate()+1)){
+      const t=+d, n=d.getDate(); g += `<line x1="${sx(t)}" x2="${sx(t)}" y1="${T}" y2="${H-B}" stroke="${css("--grid")}" stroke-dasharray="2 3"/>`;
+      if((n===1||n%every===0) && t<x1) g += `<text x="${sx(t+432e5)}" y="${H-6}" text-anchor="middle">${n}.</text>`;
+    }
+    return {W,H,L,R,T,B,sx,sy,g};
+  }
   for(let t=Math.ceil(x0/3600e3)*3600e3; t<=x1; t+=3600e3){
     const d=new Date(t); if(d.getHours() % (step/3600e3)) continue;
     const lab = d.getHours()===0 ? d.toLocaleDateString("fi-FI",{weekday:"short",day:"numeric",month:"numeric"}) : String(d.getHours()).padStart(2,"0");
@@ -529,8 +562,130 @@ function renderInsights(){
   $("insights").innerHTML = out.join("") || "<li>Ei poikkeamia.</li>";
 }
 
+// ---------- historia ----------
+const HMIX = MIX.map(m=>m.k);
+const H = { mode:"day", cache:new Map(), index:null };
+const pad = n => String(n).padStart(2,"0");
+const isoDay = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const monthKey = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}`;
+
+async function loadIndex(){
+  if(H.index) return H.index;
+  try{ const r=await fetch("archive/index.json?t="+Math.floor(Date.now()/36e5)); if(r.ok) H.index=await r.json(); }catch(e){}
+  return H.index;
+}
+async function loadMonth(key){
+  if(H.cache.has(key)) return H.cache.get(key);
+  const p = fetch(`archive/${key}.json?t=${Math.floor(Date.now()/36e5)}`).then(r=>r.ok?r.json():null).catch(()=>null);
+  H.cache.set(key,p); return p;
+}
+// rivit {t, cons, prod, wind, nuc, hyd, chp, ind, net, price}, t = tunnin alku
+function monthRows(m){
+  if(!m) return [];
+  return Array.from({length:m.hours},(_,i)=>{ const r={t:m.start+i*3600e3}; for(const k in m.s) r[k]=m.s[k][i]; return r; });
+}
+function withOther(r){
+  const o={...r}; let sum=0, any=false;
+  for(const k of HMIX) if(k!=="oth" && r[k]!=null){ sum+=r[k]; any=true; }
+  o.oth = r.prod!=null && any ? Math.max(0, r.prod-sum) : null; return o;
+}
+function dailyAvg(rows){
+  const by=new Map();
+  for(const r of rows){ const d=new Date(r.t); d.setHours(0,0,0,0); const k=+d; if(!by.has(k)) by.set(k,[]); by.get(k).push(r); }
+  return [...by.entries()].map(([t,rs])=>{ const o={t}; for(const k of Object.keys(rs[0])) if(k!=="t"){ const v=rs.map(x=>x[k]).filter(x=>x!=null); o[k]=v.length?v.reduce((a,b)=>a+b,0)/v.length:null; } return o; });
+}
+
+function stackChart(el, rows, x0, x1, step, opts){
+  const ok=rows.filter(r=>r.prod!=null||r.cons!=null);
+  if(!ok.length){ el.innerHTML=`<div class="empty">Ei tuotantodataa tälle jaksolle</div>`; return; }
+  const ymax=Math.max(...ok.map(r=>Math.max(r.prod||0, r.cons||0)))*1.06;
+  const f=frame(el,260,x0,x1,0,ymax,opts);
+  let g=""; const base=new Map(ok.map(r=>[r.t,0]));
+  for(const m of MIX){
+    for(const r of ok){ const v=r[m.k]; if(v==null||v<=0) continue; const b=base.get(r.t), x=f.sx(r.t), w=Math.max(.5,f.sx(r.t+step)-x-.4);
+      g+=`<rect x="${x.toFixed(1)}" y="${f.sy(b+v).toFixed(1)}" width="${w.toFixed(1)}" height="${(f.sy(b)-f.sy(b+v)).toFixed(1)}" fill="${css(m.c)}" fill-opacity=".85"/>`; base.set(r.t,b+v); }
+  }
+  const cons=ok.filter(r=>r.cons!=null).map(r=>({t:r.t+step/2,v:r.cons}));
+  g+=`<path d="${pathOf(f,cons)}" fill="none" stroke="${css("--ink")}" stroke-width="1.6" stroke-dasharray="5 3"/>`;
+  el.innerHTML=`<svg viewBox="0 0 ${f.W} ${f.H}" role="img" aria-label="Tuotanto ja kulutus">${f.g}${g}</svg>`;
+}
+function priceChart(el, rows, x0, x1, step, opts){
+  const ok=rows.filter(r=>r.price!=null);
+  if(!ok.length){ el.innerHTML=`<div class="empty">Ei hintadataa tälle jaksolle</div>`; return; }
+  const v=ok.map(r=>r.price), avg=v.reduce((a,b)=>a+b,0)/v.length;
+  const f=frame(el,200,x0,x1,Math.min(0,...v),Math.max(10,...v)*1.08,{...opts,left:44});
+  let g="";
+  for(const r of ok){ const x=f.sx(r.t), w=Math.max(.5,f.sx(r.t+step)-x-.4), y=f.sy(Math.max(0,r.price)), y0=f.sy(Math.min(0,r.price));
+    const col=r.price<0?css("--hyd"):r.price>avg*1.6?css("--bad"):r.price>avg?css("--chp"):css("--accent");
+    g+=`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${Math.max(.5,y0-y).toFixed(1)}" fill="${col}"><title>${new Date(r.t).toLocaleString("fi-FI",{day:"numeric",month:"numeric",hour:"2-digit",minute:"2-digit"})} ${fmt(r.price,2)} €/MWh</title></rect>`; }
+  el.innerHTML=`<svg viewBox="0 0 ${f.W} ${f.H}" role="img" aria-label="Spot-hinta">${f.g}${g}<line x1="${f.L}" x2="${f.W-f.R}" y1="${f.sy(avg)}" y2="${f.sy(avg)}" stroke="${css("--muted")}" stroke-dasharray="4 4"/></svg>`;
+}
+function histTiles(rows){
+  const avg=k=>{ const v=rows.map(r=>r[k]).filter(x=>x!=null); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null; };
+  const mx=k=>{ const v=rows.map(r=>r[k]).filter(x=>x!=null); return v.length?Math.max(...v):null; };
+  const mn=k=>{ const v=rows.map(r=>r[k]).filter(x=>x!=null); return v.length?Math.min(...v):null; };
+  const c=avg("cons"), w=avg("wind"), n=avg("net"), pr=avg("price");
+  const energy = rows.reduce((a,r)=>a+(r.cons||0),0)/1000;   // GWh (tuntiarvot MWh/h)
+  const t=(l,v,u,note)=>`<div class="tile"><span class="lbl">${l}</span><span class="val">${v}<small>${u}</small></span><span class="note">${note}</span></div>`;
+  $("hTiles").innerHTML =
+    t("Kulutus ka", fmt(c), "MW", `huippu ${fmt(mx("cons"))} MW · ${fmt(energy,energy<100?1:0)} GWh`) +
+    t("Tuulivoima ka", fmt(w), "MW", c&&w!=null?`${fmt(w/c*100)} % kulutuksesta`:"&nbsp;") +
+    t("Ydinvoima ka", fmt(avg("nuc")), "MW", "&nbsp;") +
+    t("Nettotuonti ka", n==null?"–":(n>=0?"+":"−")+fmt(Math.abs(n)), "MW", n==null?"&nbsp;":n>=0?"tuontia":"vientiä") +
+    t("Spot ka", fmt(pr,1), "€/MWh", pr==null?"&nbsp;":`${fmt(mn("price"),1)} … ${fmt(mx("price"),1)}`);
+}
+
+async function renderHistory(){
+  const idx=await loadIndex();
+  if(!idx || !idx.months?.length){ $("hMix").innerHTML=`<div class="empty">Historia-arkistoa ei ole vielä rakennettu. Aja GitHubissa työnkulku "Päivitä historia-arkisto".</div>`; $("hPrice").innerHTML=""; $("hTiles").innerHTML=""; return; }
+  const first=idx.months[0];
+  $("hDate").min=first+"-01"; $("hMonth").min=first;
+  const yest=new Date(); yest.setDate(yest.getDate()-1);
+  $("hDate").max=isoDay(new Date()); $("hMonth").max=monthKey(new Date());
+  if(!$("hDate").value) $("hDate").value=isoDay(yest);
+  if(!$("hMonth").value) $("hMonth").value=monthKey(yest);
+  $("hModeDay").setAttribute("aria-pressed",H.mode==="day"); $("hModeMonth").setAttribute("aria-pressed",H.mode==="month");
+  $("hDate").hidden=H.mode!=="day"; $("hMonth").hidden=H.mode!=="month";
+  $("hLegend").innerHTML = MIX.map(m=>`<span><i style="background:var(${m.c})"></i>${m.n}</span>`).join("")+`<span><i style="background:none;border-top:2px dashed var(--ink);height:0;width:14px;border-radius:0"></i>Kulutus</span>`;
+  let rows, x0, x1, step, opts;
+  if(H.mode==="day"){
+    const [y,m,d]=$("hDate").value.split("-").map(Number); const day=new Date(y,m-1,d);
+    x0=+day; const e=new Date(day); e.setDate(e.getDate()+1); x1=+e; step=3600e3; opts={};
+    rows=monthRows(await loadMonth(monthKey(day))).filter(r=>r.t>=x0&&r.t<x1).map(withOther);
+    $("hMeta").textContent = day.toLocaleDateString("fi-FI",{weekday:"long",day:"numeric",month:"long",year:"numeric"})+" · tuntikeskiarvot";
+    try{ history.replaceState(null,"","#"+$("hDate").value); }catch(e){}
+  }else{
+    const [y,m]=$("hMonth").value.split("-").map(Number);
+    x0=+new Date(y,m-1,1); x1=+new Date(y,m,1); step=864e5; opts={dayTicks:true};
+    rows=dailyAvg(monthRows(await loadMonth($("hMonth").value))).map(withOther);
+    $("hMeta").textContent = new Date(y,m-1,1).toLocaleDateString("fi-FI",{month:"long",year:"numeric"})+" · vuorokausikeskiarvot";
+    try{ history.replaceState(null,"","#"+$("hMonth").value); }catch(e){}
+  }
+  if(!rows.length){ $("hTiles").innerHTML=""; $("hMix").innerHTML=`<div class="empty">Ei arkistoitua dataa tälle jaksolle</div>`; $("hPrice").innerHTML=""; return; }
+  histTiles(rows);
+  if(H.mode==="month"){ const hr=monthRows(await loadMonth($("hMonth").value)); const gwh=hr.reduce((a,r)=>a+(r.cons||0),0)/1000; const n=$("hTiles").querySelector(".note"); if(n) n.textContent=`huippu ${fmt(Math.max(...hr.map(r=>r.cons||0)))} MW · ${fmt(gwh/1000,2)} TWh`; }
+  stackChart($("hMix"),rows,x0,x1,step,opts);
+  priceChart($("hPrice"),rows,x0,x1,step,opts);
+}
+function shift(dir){
+  if(H.mode==="day"){ const [y,m,d]=$("hDate").value.split("-").map(Number); const t=new Date(y,m-1,d+dir); const v=isoDay(t); if((!$("hDate").min||v>=$("hDate").min)&&v<=$("hDate").max) $("hDate").value=v; }
+  else { const [y,m]=$("hMonth").value.split("-").map(Number); const v=monthKey(new Date(y,m-1+dir,1)); if((!$("hMonth").min||v>=$("hMonth").min)&&v<=$("hMonth").max) $("hMonth").value=v; }
+  renderHistory();
+}
+$("hModeDay").onclick=()=>{ H.mode="day"; renderHistory(); };
+$("hModeMonth").onclick=()=>{ H.mode="month"; const v=$("hDate").value; if(v) $("hMonth").value=v.slice(0,7); renderHistory(); };
+$("hPrev").onclick=()=>shift(-1); $("hNext").onclick=()=>shift(1);
+$("hDate").onchange=renderHistory; $("hMonth").onchange=renderHistory;
+(function initFromHash(){
+  const h=location.hash.slice(1);
+  if(/^\d{4}-\d{2}-\d{2}$/.test(h)){ $("hDate").value=h; H.mode="day"; }
+  else if(/^\d{4}-\d{2}$/.test(h)){ $("hMonth").value=h; H.mode="month"; }
+  if(h) setTimeout(()=>$("history").scrollIntoView(),400);
+})();
+renderHistory();
+
 $("refresh").onclick=refresh;
-let rz; addEventListener("resize",()=>{clearTimeout(rz); rz=setTimeout(render,200);});
+let rz; addEventListener("resize",()=>{clearTimeout(rz); rz=setTimeout(()=>{render(); renderHistory();},200);});
 matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change",render);
 refresh();
 setInterval(()=>{ if(!document.hidden) refresh(); }, 5*60*1000);

@@ -1,0 +1,48 @@
+name: Päivitä historia-arkisto
+
+on:
+  schedule:
+    - cron: "41 1 * * *"   # kerran yössä: kuluva ja edellinen kuukausi
+  workflow_dispatch:
+    inputs:
+      from:
+        description: "Alkukuukausi takautuvaan hakuun (YYYY-MM). Tyhjä = vain kaksi viimeisintä kuukautta."
+        required: false
+        default: ""
+      force:
+        description: "Hae myös jo olemassa olevat kuukaudet uudelleen"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: archive
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Rakenna arkisto
+        env:
+          FINGRID_API_KEY: ${{ secrets.FINGRID_API_KEY }}
+        run: node scripts/archive.mjs ${{ inputs.from }} ${{ (inputs.from && inputs.force) && 'force' || '' }}
+
+      - name: Tallenna muutokset
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add site/archive
+          if git diff --cached --quiet; then echo "Ei muutoksia"; exit 0; fi
+          git commit -m "Historia-arkisto päivitetty $(date -u +%F)"
+          for i in 1 2 3; do git pull --rebase -q origin main && git push -q origin main && break; sleep 5; done
