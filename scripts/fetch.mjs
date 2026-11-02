@@ -38,8 +38,11 @@ async function fg(ids, start, end){
     if(!r.ok) throw new Error(`Fingrid ${r.status}: ${(await r.text()).slice(0,200)}`);
     const j = await r.json();
     rows = rows.concat(Array.isArray(j) ? j : (j.data || []));
-    const p = j.pagination;
-    if(p && p.nextPage && page < 20) page = p.nextPage; else break;
+    const got = (Array.isArray(j) ? j : (j.data || [])).length;
+    const p = j.pagination || {};
+    if(page === 1 && got >= 20000) console.log("Fingrid-sivutus:", JSON.stringify(p));
+    // Seuraava sivu, jos API kertoo sellaisen olevan tai sivu tuli täyteen
+    if((p.nextPage || got >= 20000) && page < 20) page = p.nextPage || page + 1; else break;
   }
   const by = {};
   for(const x of rows){
