@@ -21,9 +21,31 @@
 .voices span{color:var(--muted)}
 .voices .num{margin-left:auto;color:var(--ink);font-family:var(--f-mono);font-size:13px}
 @media (prefers-reduced-motion:reduce){#cv{height:200px}}
+/* Kiasma-tila */
+#art{position:fixed;inset:0;z-index:50;background:#0c0c0e;color:#ece8df;overflow:hidden}
+#artcv{position:absolute;inset:0;width:100%;height:100%;display:block}
+#frag{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);width:min(86vw,820px);margin:0;text-align:center;
+  font:300 clamp(22px,4.2vw,44px)/1.25 var(--f-disp);letter-spacing:.01em;text-wrap:balance;opacity:0;transition:opacity 2.6s ease;text-shadow:0 1px 24px rgba(0,0,0,.45)}
+#frag.on{opacity:.95}
+#label{position:absolute;left:max(20px,env(safe-area-inset-left,0px));bottom:max(20px,env(safe-area-inset-bottom,0px));max-width:min(340px,calc(100vw - 40px));
+  background:#f3f1ec;color:#141414;padding:14px 16px 16px;font:13px/1.45 var(--f-body);box-shadow:0 2px 30px rgba(0,0,0,.35)}
+#label b{display:block;font:600 17px/1.2 var(--f-disp);font-style:italic}
+#label .who{display:block;font-weight:600;margin-top:2px}
+#label .meta{display:block;color:#555;font-size:12px;margin-top:6px}
+#label p{margin:8px 0 0;font-size:12.5px;color:#333}
+#artExit{position:absolute;top:max(16px,env(safe-area-inset-top,0px));right:max(16px,env(safe-area-inset-right,0px));background:transparent;color:#ece8df;border:1px solid rgba(236,232,223,.4);padding:6px 12px;font:13px var(--f-body);letter-spacing:.06em;text-transform:uppercase;cursor:pointer}
+#artExit:focus-visible{outline:2px solid #ece8df;outline-offset:2px}
+.btn.kiasma{border-color:var(--ink);letter-spacing:.08em;text-transform:uppercase;font-size:12.5px}
+@media (prefers-reduced-motion:reduce){#frag{transition:none}}
 </style>
 </head>
 <body>
+<div id="art" hidden role="dialog" aria-label="Kiasma-tila">
+  <canvas id="artcv"></canvas>
+  <p id="frag" aria-live="polite"></p>
+  <aside id="label"><b id="lTitle"></b><span class="who">Aleksi Heinonen &amp; Suomen sähköjärjestelmä</span><span class="meta" id="lMeta"></span><p id="lText"></p></aside>
+  <button id="artExit" type="button">Poistu galleriasta</button>
+</div>
 <div class="wrap">
 <header>
   <div>
@@ -35,6 +57,7 @@
 
 <div class="playbar">
   <button class="btn primary play" id="play" type="button">▶ Soita</button>
+  <button class="btn kiasma" id="artBtn" type="button">Kiasma-tila</button>
   <select id="mode" aria-label="Tila">
     <option value="live">Viimeiset 24 h · 2 min silmukka</option>
     <option value="machine">Aikakone 2015 → nyt · 10 min</option>
@@ -117,7 +140,7 @@ function setup(){
   const master=ctx.createGain(); master.gain.value=+$("vol").value;
   const comp=ctx.createDynamicsCompressor(); const makeup=ctx.createGain(); makeup.gain.value=1.6; const lim=ctx.createDynamicsCompressor(); lim.threshold.value=-4; lim.knee.value=0; lim.ratio.value=20; lim.attack.value=0.001; lim.release.value=0.1; const out=ctx.createGain(); out.gain.value=0.85; master.connect(comp).connect(makeup).connect(lim).connect(out).connect(ctx.destination);
   const verb=ctx.createConvolver(); { const len=ctx.sampleRate*2.5, ir=ctx.createBuffer(2,len,ctx.sampleRate); for(let c=0;c<2;c++){ const d=ir.getChannelData(c); for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,3); } verb.buffer=ir; }
-  const wet=ctx.createGain(); wet.gain.value=0.35; verb.connect(wet).connect(master);
+  const wet=ctx.createGain(); wet.gain.value=A.art?0.85:0.35; verb.connect(wet).connect(master);
   const osc=(type,freq,dest,g=0)=>{ const o=ctx.createOscillator(); o.type=type; o.frequency.value=freq; const gn=ctx.createGain(); gn.gain.value=g; o.connect(gn).connect(dest); o.start(); return {o,g:gn}; };
   // pohjasointi: kaksi hieman eri vireistä sahaa alipäästön läpi
   const lp=ctx.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=700; lp.connect(master); lp.connect(verb);
@@ -131,7 +154,7 @@ function setup(){
   const ns=ctx.createBufferSource(); ns.buffer=noiseBuffer(ctx); ns.loop=true;
   const bp=ctx.createBiquadFilter(); bp.type="bandpass"; bp.Q.value=0.8; bp.frequency.value=500;
   const wg=ctx.createGain(); wg.gain.value=0; ns.connect(bp).connect(wg); wg.connect(master); wg.connect(verb); ns.start();
-  A.nodes={ctx,master,nucA,nucB,tone,dis,hyd,crystal,bp,wg,verb};
+  A.nodes={ctx,master,nucA,nucB,tone,dis,hyd,crystal,bp,wg,verb,wet};
 }
 function pluck(freq, vol, t, dur=0.18){
   const {ctx,master,verb}=A.nodes;
@@ -177,7 +200,7 @@ function voice(fr, dt){
     if(bi===0 && A.band!==0) sparkle();
     A.band=bi;
     if(A.nextPulse<t) A.nextPulse=t+0.05;
-    while(A.nextPulse<t+0.12){ pluck(BANDS[bi].f, 0.10+bi*0.03, A.nextPulse); A.nextPulse+=BANDS[bi].iv; }
+    while(A.nextPulse<t+0.12){ A.art ? pluck(BANDS[bi].f/2, (0.10+bi*0.03)*0.8, A.nextPulse, 1.6) : pluck(BANDS[bi].f, 0.10+bi*0.03, A.nextPulse); A.nextPulse+=BANDS[bi].iv*(A.art?2.6:1); }
   }
   A.bellAcc += Math.abs(fr.i||0)/1000*dt*0.8;
   if(A.bellAcc>=1){ A.bellAcc=0; (fr.i||0)>0 ? bell(196,-0.7) : bell(784,0.7); }
@@ -225,7 +248,7 @@ let last=0;
 function loop(now){
   if(A.playing){
     const dt=Math.min(0.1,(now-last)/1000); last=now;
-    A.pos += dt*(A.frames.length-1)/MODES[A.mode].dur;
+    A.pos += dt*(A.frames.length-1)/(MODES[A.mode].dur*(A.art?4:1));
     if(A.pos>=A.frames.length-1) A.pos = A.mode==="live" ? 0 : A.frames.length-1;
     if(A.mode==="machine" && A.pos>=A.frames.length-1) stop();
     const fr=frameAt(A.pos); voice(fr,dt); readout(fr);
@@ -251,6 +274,91 @@ function unlockIOS(){
   el.play().catch(()=>{}); A.unlock=el;
 }
 function audioStatus(msg){ $("audioState").textContent=msg; }
+
+// ---------- Kiasma-tila ----------
+const ART = { raf:0, lastFrag:0, fragIdx:-1, t0:0, seed:Math.random()*1000 };
+const HUES = [212, 196, 172, 44, 26, 6, 338];   // hintaluokat: syvä sininen → karmiini
+const F1 = v => fmt(v,1), F0 = v => fmt(Math.abs(v||0));
+const FRAGS = [
+  fr => `${F0(fr.n)} megawattia uraania muistaa olleensa kiveä.`,
+  fr => fr.w>3000 ? `Tuuli, ${F0(fr.w)} megawattia. Kukaan ei pyytänyt sitä puhaltamaan.` : `Vain ${F0(fr.w)} megawattia tuulta. Tyyneys on myös sähköä, jota ei ole.`,
+  fr => fr.f!=null ? `${fmt(fr.f,3)} hertsiä. Verkko pidättää hengitystään.` : `Kulutus ${F0(fr.c)} megawattia. Kansakunta keittää kahvia yhtä aikaa.`,
+  fr => fr.i>0 ? `Naapurit antavat ${F0(fr.i)} megawattia. Otamme vastaan sanomatta kiitos.` : `Annamme pois ${F0(fr.i)} megawattia. Lahja, jota ei voi palauttaa.`,
+  fr => `Vesi, ${F0(fr.h)} megawattia. Joki on aina ollut akku.`,
+  fr => fr.p==null ? `Hinta on tuntematon. Kuten kaikki tuleva.` : fr.p<0 ? `${F1(fr.p)} euroa. Sähkö maksaa sinulle siitä, että olet olemassa.` : fr.p>200 ? `${F0(fr.p)} euroa megawattitunnilta. Järjestelmä sanoo jotain, mitä emme halua kuulla.` : `${F1(fr.p)} euroa megawattitunnilta. Arvo on sopimus, jota kukaan ei allekirjoittanut.`,
+  fr => `Kulutus ${F0(fr.c)}. Jokainen megawatti on jonkun ilta.`,
+  fr => `50 hertsiä ei ole luku vaan lupaus.`,
+  fr => `Tämä teos ei koskaan valmistu. Se vain tasapainottuu.`,
+];
+function artTitle(fr){
+  const b=bandOf(fr.p);
+  if(b===0) return "Ylijäämän ylistys";
+  if(b===6) return `Hintapiikki nro ${Math.floor(fr.p)}`;
+  if((fr.w||0)>5000) return "Tuulen omistusoikeudesta";
+  if((fr.i||0)>2000) return "Tuonti ilman kiitosta";
+  return "Nimetön (50 Hz)";
+}
+function artLabel(fr){
+  $("lTitle").textContent=artTitle(fr);
+  $("lMeta").textContent=`${A.mode==="live"?"2026":"2015–2026"} · Fingridin avoin data, pörssihinta, Web Audio, epävarmuus · ${fmt(Math.round((fr.n||0)+(fr.w||0)+(fr.h||0)))} MW × ∞ · Kantaverkon kokoelma`;
+  const b=bandOf(fr.p);
+  $("lText").textContent = `Teos kuuntelee Suomen sähköjärjestelmää sellaisena kuin se on: ${fmt(fr.c)} megawattia tarvetta, jota ${fmt(fr.w)} megawattia tuulta, ${fmt(fr.n)} megawattia ydinvoimaa ja ${fmt(fr.h)} megawattia vettä yrittävät tavoittaa. `
+    + (b>=5 ? "Kun hinta nousee, väri kuumenee ja pulssi kiihtyy: niukkuus tehdään näkyväksi ja kuuluvaksi. " : (b>=0 && b<=1) ? "Ylijäämässä väri viilenee ja aika venyy, ikään kuin energia itse lepäisi. " : "Väri hengittää hinnan mukana, hitaasti, kuten kaikki infrastruktuuri. ")
+    + "Katsoja on osa kuormaa.";
+}
+function artDraw(now){
+  const cv=$("artcv"), g=cv.getContext("2d"), dpr=Math.min(2,devicePixelRatio||1), W=cv.clientWidth, H=cv.clientHeight;
+  if(!W||!H){ ART.raf=requestAnimationFrame(artDraw); return; }
+  if(cv.width!==Math.round(W*dpr)){ cv.width=Math.round(W*dpr); cv.height=Math.round(H*dpr); }
+  g.setTransform(dpr,0,0,dpr,0,0);
+  const fr=A.frames.length?frameAt(A.pos):{}, b=Math.max(0,bandOf(fr.p)), hue=HUES[b];
+  const tt=(now-ART.t0)/1000, breath=Math.sin(tt*0.21)*0.5+0.5, dev=fr.f!=null?clamp(Math.abs(fr.f-50)/0.1):0.2;
+  g.filter="none"; g.fillStyle=`hsl(${hue} 30% 7%)`; g.fillRect(0,0,W,H);
+  // kolme Rothko-pintaa: ydin, tuuli, vesi
+  const fields=[ {v:clamp((fr.n||0)/4400), h:hue, s:35, l:30}, {v:clamp((fr.w||0)/8000), h:hue+28, s:55, l:44}, {v:clamp((fr.h||0)/3300), h:hue-24, s:40, l:24} ];
+  const mx=W*0.09, gap=H*0.035; let y=H*0.07;
+  const total=fields.reduce((a,f)=>a+0.35+f.v,0), avail=H*0.86-gap*2;
+  g.filter=`blur(${Math.round(18+breath*14+dev*10)}px)`;
+  fields.forEach((f,i)=>{
+    const hh=avail*(0.35+f.v)/total, wob=Math.sin(tt*0.13+i*2.1+ART.seed)*W*0.012*(1+dev*3);
+    g.fillStyle=`hsl(${f.h} ${f.s}% ${f.l+breath*6}% / .92)`;
+    g.fillRect(mx+wob, y, W-2*mx-wob*0.5, hh);
+    y+=hh+gap;
+  });
+  g.filter="none";
+  // rae
+  g.fillStyle="rgba(255,255,255,.035)";
+  for(let i=0;i<260;i++) g.fillRect(Math.random()*W, Math.random()*H, 1.2, 1.2);
+  // fragmentit
+  if(now-ART.lastFrag>11000 && A.frames.length){
+    ART.lastFrag=now; const el=$("frag"); el.classList.remove("on");
+    setTimeout(()=>{ let k; do{ k=Math.floor(Math.random()*FRAGS.length); }while(k===ART.fragIdx && FRAGS.length>1); ART.fragIdx=k;
+      el.textContent=FRAGS[k](frameAt(A.pos)); el.classList.add("on"); artLabel(frameAt(A.pos)); }, 2700);
+  }
+  ART.raf=requestAnimationFrame(artDraw);
+}
+async function enterArt(){
+  A.art=true; $("art").hidden=false; document.body.style.overflow="hidden";
+  try{ await document.documentElement.requestFullscreen?.(); }catch(e){}
+  if(A.nodes) A.nodes.wet.gain.setTargetAtTime(0.85,A.nodes.ctx.currentTime,1.5);
+  ART.t0=performance.now(); ART.lastFrag=performance.now()-8000;
+  if(A.frames.length) artLabel(frameAt(A.pos));
+  cancelAnimationFrame(ART.raf); ART.raf=requestAnimationFrame(artDraw);
+  $("artExit").focus();
+  if(!A.playing){ try{ await playClick(); }catch(e){ audioStatus("Ääni ei käynnistynyt: "+e.message); } }
+}
+function exitArt(){
+  A.art=false; $("art").hidden=true; document.body.style.overflow=""; cancelAnimationFrame(ART.raf);
+  $("frag").classList.remove("on");
+  if(A.nodes) A.nodes.wet.gain.setTargetAtTime(0.35,A.nodes.ctx.currentTime,0.8);
+  if(document.fullscreenElement) document.exitFullscreen?.().catch(()=>{});
+  $("artBtn").focus();
+}
+$("artBtn").onclick=()=>enterArt().catch(e=>audioStatus("Kiasma-tila epäonnistui: "+e.message));
+$("artExit").onclick=exitArt;
+addEventListener("keydown",e=>{ if(e.key==="Escape" && A.art) exitArt(); });
+document.addEventListener("fullscreenchange",()=>{ if(!document.fullscreenElement && A.art && !$("art").hidden){ /* käyttäjä poistui kokoruudusta: installaatio jatkuu ikkunassa */ } });
+
 $("scale").onclick=async()=>{
   try{
     if(!A.nodes) setup(); unlockIOS(); await A.nodes.ctx.resume();
