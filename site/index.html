@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sähkötilanne</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+
+/* Layout: control-room board. Status strip on top, then "nyt" tiles, mix + transfers, 48 h outlook, reserves. */
+:root{
+  --bg:#f3f5f4; --panel:#ffffff; --ink:#15201d; --muted:#5d6b67; --line:#dfe5e3; --grid:#e9eeec;
+  --accent:#0b6e63;
+  --nuc:#7a5af5; --hyd:#2f7fd8; --wind:#16a39a; --chp:#d9822b; --ind:#b4542f; --oth:#9aa5a2; --sun:#e6b400;
+  --ok:#1f9d55; --warn:#d99a00; --bad:#d4372c; --blk:#222; --rest:#2f6fd8;
+  --pos:#1f9d55; --neg:#d4372c;
+  --f-disp:"Barlow Semi Condensed","Arial Narrow",Arial,sans-serif;
+  --f-body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0e1514; --panel:#151f1d; --ink:#e4ece9; --muted:#8e9d99; --line:#24312e; --grid:#1d2826;
+  --accent:#3cc2b1; --nuc:#9c86ff; --hyd:#5aa2f0; --wind:#2cc4b9; --chp:#f0a050; --ind:#d77551; --oth:#6f7d79; --sun:#f2cc3a;
+  --ok:#3ccf7a; --warn:#f0b730; --bad:#ff6355; --blk:#000; --rest:#5a95f0; --pos:#3ccf7a; --neg:#ff6355;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0e1514; --panel:#151f1d; --ink:#e4ece9; --muted:#8e9d99; --line:#24312e; --grid:#1d2826;
+  --accent:#3cc2b1; --nuc:#9c86ff; --hyd:#5aa2f0; --wind:#2cc4b9; --chp:#f0a050; --ind:#d77551; --oth:#6f7d79; --sun:#f2cc3a;
+  --ok:#3ccf7a; --warn:#f0b730; --bad:#ff6355; --blk:#000; --rest:#5a95f0; --pos:#3ccf7a; --neg:#ff6355;
+  color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 var(--f-body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:16px 40px}
+.wrap{max-width:1240px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+h1,h2{font-family:var(--f-disp);margin:0;text-wrap:balance}
+h1{font-size:28px;font-weight:700;letter-spacing:.01em}
+h2{font-size:15px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.mono,.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+.hmeta{display:flex;flex-wrap:wrap;gap:10px;align-items:center;color:var(--muted);font-size:13px}
+button,input{font:inherit}
+.btn{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:6px;padding:6px 12px;cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+
+.status{display:flex;align-items:center;gap:14px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 16px;flex-wrap:wrap}
+.lamp{width:14px;height:14px;border-radius:50%;background:var(--oth);box-shadow:0 0 0 4px color-mix(in srgb,var(--oth) 25%,transparent);flex:none}
+.status b{font-family:var(--f-disp);font-size:18px}
+.status .sub{color:var(--muted);font-size:13px}
+
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.tile{background:var(--panel);padding:14px 16px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.tile .lbl{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.tile .val{font-family:var(--f-disp);font-size:32px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums}
+.tile .val small{font-size:15px;font-weight:500;color:var(--muted);margin-left:4px}
+.tile .note{font-size:12.5px;color:var(--muted)}
+
+.grid2{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:16px}
+@media (max-width:860px){.grid2{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.panel .head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:10px;height:10px;border-radius:2px;display:inline-block}
+.legend .num{color:var(--muted)}
+.chart{width:100%;min-height:200px}
+.chart svg{display:block;width:100%;height:auto}
+.chart text{fill:var(--muted);font:11px var(--f-mono)}
+
+.insights{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none}
+.insights li{display:flex;gap:10px;align-items:flex-start;font-size:14.5px}
+.insights li::before{content:"";flex:none;width:8px;height:8px;margin-top:7px;border-radius:50%;background:var(--sev,var(--accent))}
+
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:6px 4px;border-bottom:1px solid var(--grid);text-align:left}
+th{font-weight:500;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+td.num,th.num{text-align:right}
+
+.err{color:var(--bad);font-size:13.5px}
+.empty{color:var(--muted);font-size:14px;padding:30px 0;text-align:center}
+footer{color:var(--muted);font-size:12.5px}
+footer a{color:var(--accent)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+.chip{display:inline-block;font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:2px 7px;border-radius:999px;border:1px solid currentColor;white-space:nowrap}
+.chip.on{color:var(--bad)} .chip.plan{color:var(--warn)} .chip.soon{color:var(--muted)}
+.bar{height:6px;border-radius:3px;background:var(--grid);overflow:hidden;min-width:60px}
+.bar i{display:block;height:100%;background:var(--bad)}
+.umm td{vertical-align:top}
+.umm .reason{color:var(--muted);font-size:12.5px}
+.stale{color:var(--warn)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div>
+    <h1>Sähkötilanne</h1>
+    <div class="hmeta"><span>Suomen sähköjärjestelmä · tarjousalue FI</span><span id="updated" class="mono">–</span></div>
+  </div>
+  <div class="hmeta"><button class="btn" id="refresh" type="button">Päivitä</button></div>
+</header>
+
+<div class="status" id="status">
+  <span class="lamp" id="lamp"></span>
+  <div><b id="stateText">Järjestelmän tila –</b><div class="sub" id="stateSub">Fingridin tilatieto</div></div>
+  <div class="sub" style="margin-left:auto">Taajuus <span class="mono" id="freq">–</span></div>
+</div>
+
+<div class="tiles">
+  <div class="tile"><span class="lbl">Kulutus</span><span class="val" id="t-cons">–</span><span class="note" id="t-cons-n">&nbsp;</span></div>
+  <div class="tile"><span class="lbl">Tuotanto</span><span class="val" id="t-prod">–</span><span class="note" id="t-prod-n">&nbsp;</span></div>
+  <div class="tile"><span class="lbl">Nettotuonti</span><span class="val" id="t-net">–</span><span class="note" id="t-net-n">&nbsp;</span></div>
+  <div class="tile"><span class="lbl">Spot nyt</span><span class="val" id="t-spot">–</span><span class="note" id="t-spot-n">&nbsp;</span></div>
+  <div class="tile"><span class="lbl">Päästökerroin</span><span class="val" id="t-co2">–</span><span class="note" id="t-co2-n">kulutettu sähkö</span></div>
+</div>
+
+<section class="panel">
+  <div class="head"><h2>Tilannekuva</h2><span class="hmeta">automaattisesti datasta</span></div>
+  <ul class="insights" id="insights"><li>Ladataan…</li></ul>
+</section>
+
+<div class="grid2">
+  <section class="panel">
+    <div class="head"><h2>Tuotantomix, 24 h</h2><span class="hmeta">MW, 3 min</span></div>
+    <div class="legend" id="mixLegend"></div>
+    <div class="chart" id="mixChart"><div class="empty">Ei tuotantodataa</div></div>
+  </section>
+  <section class="panel">
+    <div class="head"><h2>Rajasiirrot nyt</h2><span class="hmeta">MW</span></div>
+    <div class="chart" id="flowMap"><div class="empty">Ei siirtodataa</div></div>
+  </section>
+</div>
+
+<section class="panel">
+  <div class="head"><h2>Käytettävyysrajoitukset</h2><span class="hmeta">Nord Pool UMM · ydinvoima ja ≥ 100 MW · nyt ja 3 vk eteenpäin</span></div>
+  <div style="overflow-x:auto"><table class="umm" id="ummTable"><tbody><tr><td class="empty">Ei ilmoituksia</td></tr></tbody></table></div>
+</section>
+
+<section class="panel">
+  <div class="head"><h2>Spot-hinta tänään ja huomenna</h2><span class="hmeta">snt/kWh sis. alv 25,5 % · 15 min</span></div>
+  <div class="legend" id="priceLegend"></div>
+  <div class="chart" id="priceChart"><div class="empty">Ei hintadataa</div></div>
+</section>
+
+<div class="grid2">
+  <section class="panel">
+    <div class="head"><h2>Ennuste 48 h</h2><span class="hmeta">MW · Fingridin ennusteet</span></div>
+    <div class="legend" id="fcLegend"></div>
+    <div class="chart" id="fcChart"><div class="empty">Ei ennustedataa</div></div>
+  </section>
+  <section class="panel">
+    <div class="head"><h2>Reservit ja säätö</h2><span class="hmeta">viimeisin arvo</span></div>
+    <div style="overflow-x:auto"><table id="resTable"><tbody><tr><td class="empty">Ei reservidataa</td></tr></tbody></table></div>
+  </section>
+</div>
+
+<section class="panel">
+  <div class="head"><h2>Sama päivä aiempina vuosina</h2><span class="hmeta" id="histDate">kulutus, MW tunnin keskiarvona</span></div>
+  <div class="legend" id="histLegend"></div>
+  <div class="chart" id="histChart"><div class="empty">Ei historiadataa</div></div>
+  <div style="overflow-x:auto"><table id="histTable"></table></div>
+</section>
+
+<div class="err" id="err" role="status"></div>
+
+<footer>Lähteet: <a href="https://data.fingrid.fi" target="_blank" rel="noopener">Fingrid avoin data</a> (CC BY 4.0) · spot-hinnat <a href="https://porssisahko.net" target="_blank" rel="noopener">porssisahko.net</a> · käytettävyysilmoitukset <a href="https://umm.nordpoolgroup.com" target="_blank" rel="noopener">Nord Pool UMM</a>. Data haetaan noin 15 minuutin välein.</footer>
+</div>
+
+<script>
+"use strict";
+const RT = { prod:192, cons:193, net:194, wind:181, nuc:188, hyd:191, chp:201, ind:202,
+             freq:177, state:209, co2c:265, co2p:266, se1:87, se3:89, ee:180, no:187 };
+const FC = { windF:245, solarF:248, consF:166, windCap:268 };
+const RES = [
+  {id:317, n:"FCR-N, hinta", u:"€/MW,h"}, {id:318, n:"FCR-D ylös, hinta", u:"€/MW,h"},
+  {id:52, n:"aFRR ylös, hinta", u:"€/MW,h"}, {id:51, n:"aFRR alas, hinta", u:"€/MW,h"},
+  {id:244, n:"Ylössäätöhinta", u:"€/MWh"}, {id:106, n:"Alassäätöhinta", u:"€/MWh"},
+  {id:319, n:"Epätasapainohinta", u:"€/MWh"}
+];
+const MIX = [
+  {k:"nuc", n:"Ydinvoima", c:"--nuc"}, {k:"hyd", n:"Vesivoima", c:"--hyd"}, {k:"wind", n:"Tuulivoima", c:"--wind"},
+  {k:"chp", n:"Kaukolämpö-CHP", c:"--chp"}, {k:"ind", n:"Teollisuus-CHP", c:"--ind"}, {k:"oth", n:"Muu", c:"--oth"}
+];
+const STATES = {1:["Normaali","--ok"],2:["Vaarantunut","--warn"],3:["Häiriötila","--bad"],4:["Suurhäiriö","--blk"],5:["Palautus","--rest"]};
+const H_COLORS = ["--ink","--accent","--chp","--nuc"];
+
+const $ = id => document.getElementById(id);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const fmt = (v,d=0) => v==null||isNaN(v) ? "–" : v.toLocaleString("fi-FI",{minimumFractionDigits:d,maximumFractionDigits:d});
+const hhmm = t => new Date(t).toLocaleTimeString("fi-FI",{hour:"2-digit",minute:"2-digit"});
+const dt = t => t ? new Date(t).toLocaleString("fi-FI",{weekday:"short",day:"numeric",month:"numeric",hour:"2-digit",minute:"2-digit"}) : "–";
+const REASONS = {"yearly maintenance":"vuosihuolto","normal refueling outage":"polttoaineenvaihto","refueling outage":"polttoaineenvaihto","repair":"korjaus","failure":"vika","planned maintenance":"suunniteltu huolto","maintenance":"huolto","reduced capacity":"rajoitettu teho","technical failure":"tekninen vika"};
+const reasonFi = r => REASONS[String(r||"").trim().toLowerCase()] || r || "";
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let S = { rt:{}, fc:{}, res:{}, prices:[], umm:[], hist:null, generated:0 };
+
+const toPts = by => { const o={}; for(const id in by||{}) o[id]=by[id].map(([t,v])=>({t,v})); return o; };
+
+async function refresh(){
+  $("refresh").disabled = true;
+  try{
+    const r = await fetch("data.json?t="+Date.now(), {cache:"no-store"});
+    if(!r.ok) throw new Error("data.json puuttuu ("+r.status+"). Onko GitHub Actions ajettu?");
+    const j = await r.json();
+    S = { rt:toPts(j.rt), fc:toPts(j.fc), res:toPts(j.res),
+          prices:(j.prices||[]).map(([t,e,v])=>({t,e,v})), umm:j.umm||[], hist:j.hist||null, generated:j.generated||0 };
+    $("err").textContent = (j.errors||[]).length ? "Osa datasta puuttuu: " + j.errors.join(" · ") : "";
+  }catch(e){ $("err").textContent = e.message; }
+  const age = (Date.now()-S.generated)/60000;
+  $("updated").innerHTML = S.generated ? `data ${hhmm(S.generated)}${age>45?` <span class="stale">(${fmt(age)} min vanha)</span>`:""}` : "–";
+  $("refresh").disabled = false;
+  render();
+}
+
+const last = id => { const a=S.rt[id]; return a&&a.length ? a[a.length-1] : null; };
+const lastOf = (src,id) => { const a=src[id]; return a&&a.length ? a[a.length-1] : null; };
+function priceNow(){ const n=Date.now(); return S.prices.find(p=>p.t<=n && n<(p.e||p.t+9e5)); }
+const dayStart = (d=new Date()) => { const x=new Date(d); x.setHours(0,0,0,0); return +x; };
+
+function render(){
+  for(const f of [renderStatus,renderTiles,renderMix,renderFlows,renderUmm,renderPrices,renderForecast,renderRes,renderHist,renderInsights]){
+    try{ f(); }catch(e){ console.error(f.name, e); }
+  }
+}
+
+function renderStatus(){
+  const s = last(RT.state), f = last(RT.freq);
+  const st = s ? STATES[Math.round(s.v)] : null;
+  const col = st ? css(st[1]) : css("--oth");
+  $("lamp").style.background = col;
+  $("lamp").style.boxShadow = `0 0 0 4px color-mix(in srgb, ${col} 25%, transparent)`;
+  $("stateText").textContent = "Järjestelmän tila: " + (st ? st[0] : "–");
+  $("stateSub").textContent = s ? "Fingrid, " + hhmm(s.t) : "Fingridin tilatieto";
+  $("freq").textContent = f ? fmt(f.v,3)+" Hz" : "–";
+}
+
+function setTile(id,html,note){ $(id).innerHTML = html; if(note!=null) $(id+"-n").textContent = note; }
+function renderTiles(){
+  const c=last(RT.cons), p=last(RT.prod), n=last(RT.net), co=last(RT.co2c);
+  setTile("t-cons", c?`${fmt(c.v)}<small>MW</small>`:"–", c?"klo "+hhmm(c.t):" ");
+  setTile("t-prod", p?`${fmt(p.v)}<small>MW</small>`:"–", p&&c ? `omavaraisuus ${fmt(p.v/c.v*100)} %` : " ");
+  setTile("t-net", n?`${n.v>0?"+":"−"}${fmt(Math.abs(n.v))}<small>MW</small>`:"–", n ? (n.v>0?"tuontia":"vientiä") : " ");
+  const pn = priceNow();
+  setTile("t-spot", pn?`${fmt(pn.v,2)}<small>snt/kWh</small>`:"–", pn ? priceNote() : " ");
+  setTile("t-co2", co?`${fmt(co.v)}<small>g/kWh</small>`:"–", null);
+}
+function priceNote(){
+  const d0 = dayStart(); const today = S.prices.filter(p=>p.t>=d0 && p.t<d0+864e5);
+  if(!today.length) return " ";
+  return `tänään ${fmt(Math.min(...today.map(p=>p.v)),1)}…${fmt(Math.max(...today.map(p=>p.v)),1)}`;
+}
+
+function frame(el, h, x0, x1, y0, y1, opts={}){
+  const W = Math.max(320, Math.round(el.clientWidth||600)), H=h, L=opts.left??46, R=10, T=10, B=24;
+  const sx = t => L + (t-x0)/(x1-x0)*(W-L-R);
+  const sy = v => T + (1-(v-y0)/(y1-y0))*(H-T-B);
+  let g = "";
+  for(const v of niceTicks(y0,y1,4)){ g += `<line x1="${L}" x2="${W-R}" y1="${sy(v)}" y2="${sy(v)}" stroke="${css("--grid")}"/><text x="${L-6}" y="${sy(v)+4}" text-anchor="end">${fmt(v, opts.yd||0)}</text>`; }
+  const step = (x1-x0) > 36*3600e3 ? 6*3600e3 : 3*3600e3;
+  for(let t=Math.ceil(x0/3600e3)*3600e3; t<=x1; t+=3600e3){
+    const d=new Date(t); if(d.getHours() % (step/3600e3)) continue;
+    const lab = d.getHours()===0 ? d.toLocaleDateString("fi-FI",{weekday:"short",day:"numeric",month:"numeric"}) : String(d.getHours()).padStart(2,"0");
+    g += `<line x1="${sx(t)}" x2="${sx(t)}" y1="${T}" y2="${H-B}" stroke="${css("--grid")}" ${d.getHours()===0?'':'stroke-dasharray="2 3"'}/><text x="${sx(t)}" y="${H-6}" text-anchor="middle">${lab}</text>`;
+  }
+  return {W,H,L,R,T,B,sx,sy,g};
+}
+function niceTicks(a,b,n){
+  const span=b-a; if(!(span>0)) return [a];
+  const raw=span/n, mag=10**Math.floor(Math.log10(raw)), st=[1,2,2.5,5,10].map(m=>m*mag).find(s=>s>=raw);
+  const out=[]; for(let v=Math.ceil(a/st)*st; v<=b+1e-9; v+=st) out.push(+v.toFixed(6)); return out;
+}
+function nowLine(f, x0, x1){
+  const n=Date.now(); if(n<x0||n>x1) return "";
+  return `<line x1="${f.sx(n)}" x2="${f.sx(n)}" y1="${f.T}" y2="${f.H-f.B}" stroke="${css("--ink")}" stroke-width="1.5"/><text x="${f.sx(n)+4}" y="${f.T+10}" text-anchor="start" style="fill:${css("--ink")}">nyt</text>`;
+}
+const pathOf = (f, pts) => pts.map((p,i)=>`${i?"L":"M"}${f.sx(p.t).toFixed(1)},${f.sy(p.v).toFixed(1)}`).join("");
+
+function renderMix(){
+  const base = S.rt[RT.prod], el = $("mixChart");
+  if(!base||base.length<2){ $("mixLegend").innerHTML=""; return; }
+  const maps = {}; for(const m of MIX) if(m.k!=="oth") maps[m.k]=new Map((S.rt[RT[m.k]]||[]).map(p=>[p.t,p.v]));
+  const prev = {};
+  const rows = base.map(p=>{
+    const r={t:p.t,total:p.v}; let sum=0;
+    for(const m of MIX){ if(m.k==="oth") continue; let v=maps[m.k].get(p.t); if(v==null) v=prev[m.k]??0; prev[m.k]=v; r[m.k]=Math.max(0,v); sum+=r[m.k]; }
+    r.oth=Math.max(0,p.v-sum); return r;
+  });
+  const x0=rows[0].t, x1=rows[rows.length-1].t;
+  const cons = (S.rt[RT.cons]||[]).filter(c=>c.t>=x0);
+  const ymax = Math.max(...rows.map(r=>r.total), ...cons.map(c=>c.v))*1.05;
+  const f = frame(el, 260, x0, x1, 0, ymax);
+  let paths="", acc=rows.map(()=>0);
+  for(const m of MIX){
+    const top = rows.map((r,i)=>acc[i]+r[m.k]);
+    let d = rows.map((r,i)=>`${i?"L":"M"}${f.sx(r.t).toFixed(1)},${f.sy(top[i]).toFixed(1)}`).join("");
+    for(let i=rows.length-1;i>=0;i--) d+=`L${f.sx(rows[i].t).toFixed(1)},${f.sy(acc[i]).toFixed(1)}`;
+    paths += `<path d="${d}Z" fill="${css(m.c)}" fill-opacity=".85"/>`;
+    acc = top;
+  }
+  el.innerHTML = `<svg viewBox="0 0 ${f.W} ${f.H}" role="img" aria-label="Tuotantomix 24 tuntia">${f.g}${paths}<path d="${pathOf(f,cons)}" fill="none" stroke="${css("--ink")}" stroke-width="1.6" stroke-dasharray="5 3"/></svg>`;
+  const lr = rows[rows.length-1];
+  $("mixLegend").innerHTML = MIX.map(m=>`<span><i style="background:var(${m.c})"></i>${m.n} <b class="num">${fmt(lr[m.k])}</b></span>`).join("")
+    + `<span><i style="background:none;border-top:2px dashed var(--ink);height:0;width:14px;border-radius:0"></i>Kulutus</span>`;
+}
+
+function renderFlows(){
+  const el=$("flowMap");
+  const L = {se1:last(RT.se1), se3:last(RT.se3), ee:last(RT.ee), no:last(RT.no)};
+  if(!L.se1 && !L.se3 && !L.ee) return;
+  const W=360,H=330, fi={x:220,y:175};
+  const nodes = [
+    {k:"no", n:"Norja", x:250,y:30},
+    {k:"se1",n:"SE1 Pohjois-Ruotsi", x:70,y:85},
+    {k:"se3",n:"SE3 Fenno-Skan", x:60,y:225},
+    {k:"ee", n:"Viro (Estlink)", x:215,y:305}
+  ];
+  let g=`<defs><marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10Z" fill="context-stroke"/></marker></defs>`;
+  g += `<path d="M205,40 L265,55 L285,110 L300,190 L285,265 L240,290 L190,282 L170,240 L180,170 L175,110 Z" fill="${css("--accent")}" fill-opacity=".12" stroke="${css("--accent")}" stroke-opacity=".5"/>`;
+  g += `<text x="${fi.x+2}" y="${fi.y-6}" text-anchor="middle" style="font:600 16px var(--f-disp);fill:${css("--ink")}">FI</text>`;
+  const n = last(RT.net);
+  g += `<text x="${fi.x+2}" y="${fi.y+12}" text-anchor="middle" style="fill:${css("--muted")}">netto ${n?(n.v>0?"tuonti ":"vienti ")+fmt(Math.abs(n.v)):"–"}</text>`;
+  for(const nd of nodes){
+    const p=L[nd.k], v=p?p.v:null, exp = v!=null && v>0;
+    const col = v==null ? css("--oth") : exp ? css("--chp") : css("--hyd");
+    const w = v==null?1.5:Math.min(9,1.5+Math.abs(v)/250);
+    const a = {x:fi.x+(nd.x-fi.x)*0.28, y:fi.y+(nd.y-fi.y)*0.28}, b={x:nd.x+(fi.x-nd.x)*0.18,y:nd.y+(fi.y-nd.y)*0.18};
+    const [s,e] = exp ? [a,b] : [b,a];
+    g += `<line x1="${s.x}" y1="${s.y}" x2="${e.x}" y2="${e.y}" stroke="${col}" stroke-width="${w}" stroke-linecap="round" ${v!=null&&Math.abs(v)>5?'marker-end="url(#ah)"':''}/>`;
+    const ta = nd.x<fi.x ? "start":"middle", tx = nd.x<fi.x ? 4 : nd.x;
+    g += `<text x="${tx}" y="${nd.y-8}" text-anchor="${ta}" style="fill:${css("--muted")}">${nd.n}</text>`;
+    g += `<text x="${tx}" y="${nd.y+8}" text-anchor="${ta}" style="font:600 15px var(--f-mono);fill:${col}">${v==null?"–":(exp?"→ ":"← ")+fmt(Math.abs(v))}</text>`;
+  }
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Rajasiirrot">${g}</svg>
+    <div class="legend"><span><i style="background:var(--chp)"></i>vienti Suomesta</span><span><i style="background:var(--hyd)"></i>tuonti Suomeen</span></div>`;
+}
+
+function ummState(u){
+  const n=Date.now();
+  if(u.start<=n && (!u.stop || u.stop>n)) return u.planned ? ["käynnissä","plan"] : ["häiriö","on"];
+  return ["tulossa","soon"];
+}
+function renderUmm(){
+  const now=Date.now();
+  const rows = S.umm.filter(u=>!u.stop || u.stop>now).sort((a,b)=>{
+    const ao=a.start<=now, bo=b.start<=now; if(ao!==bo) return ao?-1:1; return a.start-b.start; });
+  if(!rows.length){ $("ummTable").innerHTML = `<tbody><tr><td class="empty">Ei voimassa olevia tai tulevia ilmoituksia</td></tr></tbody>`; return; }
+  $("ummTable").innerHTML = `<thead><tr><th>Yksikkö</th><th>Tila</th><th class="num">Poissa MW</th><th></th><th>Alkaa</th><th>Päättyy</th></tr></thead><tbody>` +
+    rows.slice(0,25).map(u=>{
+      const [st,cl]=ummState(u); const share = u.installed ? Math.min(100, (u.unavailable||0)/u.installed*100) : 0;
+      return `<tr><td>${esc(u.unit)}${u.kind==="siirto"?" <span class='chip soon'>siirto</span>":""}<div class="reason">${esc(reasonFi(u.reason))}${u.planned?"":" · suunnittelematon"}</div></td>
+        <td><span class="chip ${cl}">${st}</span></td>
+        <td class="num">${fmt(u.unavailable)}${u.installed?` <span class="reason">/ ${fmt(u.installed)}</span>`:""}</td>
+        <td><div class="bar"><i style="width:${share}%"></i></div></td>
+        <td class="mono">${dt(u.start)}</td><td class="mono">${dt(u.stop)}</td></tr>`;
+    }).join("") + `</tbody>`;
+}
+
+function renderPrices(){
+  const el=$("priceChart"), P=S.prices; if(!P.length) return;
+  const x0=dayStart(), lastP=P[P.length-1], x1=Math.max(x0+864e5, lastP.e||lastP.t+9e5);
+  const vis=P.filter(p=>p.t>=x0); if(!vis.length) return;
+  const vals=vis.map(p=>p.v), ymin=Math.min(0,...vals), ymax=Math.max(5,...vals)*1.08;
+  const f=frame(el,240,x0,x1,ymin,ymax,{left:40});
+  const avg = vals.reduce((a,b)=>a+b,0)/vals.length;
+  let bars="";
+  for(const p of vis){
+    const e=p.e||p.t+9e5, x=f.sx(p.t), w=Math.max(1,f.sx(e)-x-0.6);
+    const y=f.sy(Math.max(0,p.v)), y0=f.sy(Math.min(0,p.v));
+    const col = p.v<0 ? css("--hyd") : p.v>avg*1.6 ? css("--bad") : p.v>avg ? css("--chp") : css("--accent");
+    bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${Math.max(.5,y0-y).toFixed(1)}" fill="${col}" fill-opacity="${e<Date.now()?.45:.9}"><title>${hhmm(p.t)} ${fmt(p.v,2)} snt/kWh</title></rect>`;
+  }
+  el.innerHTML=`<svg viewBox="0 0 ${f.W} ${f.H}" role="img" aria-label="Spot-hinnat">${f.g}${bars}<line x1="${f.L}" x2="${f.W-f.R}" y1="${f.sy(avg)}" y2="${f.sy(avg)}" stroke="${css("--muted")}" stroke-dasharray="4 4"/>${nowLine(f,x0,x1)}</svg>`;
+  const tomorrow = P.filter(p=>p.t>=x0+864e5);
+  const tm = tomorrow.length ? `huomenna ka ${fmt(tomorrow.reduce((a,b)=>a+b.v,0)/tomorrow.length,2)}` : "huomisen hinnat julkaistaan n. klo 14";
+  $("priceLegend").innerHTML = `<span><i style="background:var(--accent)"></i>alle keskiarvon</span><span><i style="background:var(--chp)"></i>yli keskiarvon</span><span><i style="background:var(--bad)"></i>&gt; 1,6 × ka</span><span><i style="background:var(--hyd)"></i>negatiivinen</span><span class="num">jakso ka ${fmt(avg,2)} · ${tm}</span>`;
+}
+
+function renderForecast(){
+  const el=$("fcChart");
+  const w=S.fc[FC.windF]||[], s=S.fc[FC.solarF]||[], c=S.fc[FC.consF]||[];
+  if(!w.length && !c.length) return;
+  const now=Date.now(), x0=now-6*3600e3, x1=Math.max(now+3600e3, ...[w,s,c].map(a=>a.length?a[a.length-1].t:now));
+  const all=[...w,...s,...c].filter(p=>p.t>=x0).map(p=>p.v);
+  const f=frame(el,240,x0,x1,0,Math.max(100,...all)*1.08);
+  const line=(a,col,fill)=>{ const pts=a.filter(p=>p.t>=x0); if(!pts.length) return "";
+    const d=pathOf(f,pts);
+    return (fill?`<path d="${d}L${f.sx(pts[pts.length-1].t)},${f.sy(0)}L${f.sx(pts[0].t)},${f.sy(0)}Z" fill="${col}" fill-opacity=".18"/>`:"")+`<path d="${d}" fill="none" stroke="${col}" stroke-width="1.8"/>`; };
+  el.innerHTML=`<svg viewBox="0 0 ${f.W} ${f.H}" role="img" aria-label="Ennusteet">${f.g}${line(w,css("--wind"),1)}${line(s,css("--sun"),1)}${line(c,css("--ink"),0)}${nowLine(f,x0,x1)}</svg>`;
+  const cap=lastOf(S.fc,FC.windCap);
+  $("fcLegend").innerHTML=`<span><i style="background:var(--wind)"></i>Tuuli</span><span><i style="background:var(--sun)"></i>Aurinko</span><span><i style="background:var(--ink)"></i>Kulutus</span>${cap?`<span class="num">tuulikapasiteetti ${fmt(cap.v)} MW</span>`:""}`;
+}
+
+function renderRes(){
+  const rows = RES.map(r=>{ const p=lastOf(S.res,r.id); return p?`<tr><td>${r.n}</td><td class="num">${fmt(p.v,2)}</td><td>${r.u}</td><td class="num mono">${hhmm(p.t)}</td></tr>`:""; }).join("");
+  if(rows) $("resTable").innerHTML=`<thead><tr><th>Tuote</th><th class="num">Arvo</th><th>Yksikkö</th><th class="num">Jakso</th></tr></thead><tbody>${rows}</tbody>`;
+}
+
+// hourly average → [{h, v}] for h = 0..23 counted from series' day start
+function hourly(pts, d0){
+  const b = Array.from({length:24},()=>[0,0]);
+  for(const p of pts){ const h=Math.floor((p.t-d0)/3600e3); if(h>=0&&h<24){ b[h][0]+=p.v; b[h][1]++; } }
+  return b.map(([s,n],h)=>n?{h,v:s/n}:null).filter(Boolean);
+}
+function stats(pts){ if(!pts.length) return null; const v=pts.map(p=>p.v); return {avg:v.reduce((a,b)=>a+b,0)/v.length, max:Math.max(...v)}; }
+function renderHist(){
+  const H=S.hist; if(!H||!H.years) return;
+  const d0=dayStart();
+  const series=[{label:"Tänään", cons:hourly(S.rt[RT.cons]||[],d0), prod:stats((S.rt[RT.prod]||[]).filter(p=>p.t>=d0)),
+                 wind:stats((S.rt[RT.wind]||[]).filter(p=>p.t>=d0)), cAll:stats((S.rt[RT.cons]||[]).filter(p=>p.t>=d0)), partial:true}];
+  for(const y of Object.keys(H.years).sort().reverse()){
+    const by=toPts(H.years[y]); const c=by[124]||[]; if(!c.length) continue;
+    const yd0=c[0].t; // vuorokauden alku (Helsinki) ko. vuonna
+    series.push({label:y, cons:hourly(c,yd0), cAll:stats(c), prod:stats(by[74]||[]), wind:stats(by[75]||[])});
+  }
+  if(series.length<2) return;
+  const el=$("histChart");
+  const all=series.flatMap(s=>s.cons.map(p=>p.v));
+  const x0=d0, x1=d0+864e5;
+  const f=frame(el,240,x0,x1,Math.min(...all)*0.95,Math.max(...all)*1.03);
+  let g="";
+  series.slice().reverse().forEach((s,ri)=>{
+    const i=series.length-1-ri, col=css(H_COLORS[i]||"--oth");
+    const pts=s.cons.map(p=>({t:d0+p.h*3600e3+1800e3, v:p.v}));
+    g+=`<path d="${pathOf(f,pts)}" fill="none" stroke="${col}" stroke-width="${i?1.6:2.4}" ${i?'stroke-opacity=".8"':''}/>`;
+  });
+  el.innerHTML=`<svg viewBox="0 0 ${f.W} ${f.H}" role="img" aria-label="Kulutus vuosivertailu">${f.g}${g}${nowLine(f,x0,x1)}</svg>`;
+  $("histLegend").innerHTML=series.map((s,i)=>`<span><i style="background:var(${H_COLORS[i]||"--oth"})"></i>${s.label}</span>`).join("");
+  $("histDate").textContent = `${new Date().toLocaleDateString("fi-FI",{day:"numeric",month:"long"})} · kulutus, MW tunnin keskiarvona`;
+  const today=series[0];
+  const diff=(v,ref)=> v&&ref ? ` <span class="reason">${v.avg>=ref.avg?"+":"−"}${fmt(Math.abs(v.avg/ref.avg*100-100))} %</span>` : "";
+  $("histTable").innerHTML=`<thead><tr><th></th><th class="num">Kulutus ka</th><th class="num">Kulutus max</th><th class="num">Tuotanto ka</th><th class="num">Tuuli ka</th></tr></thead><tbody>`+
+    series.map((s,i)=>`<tr><td>${s.label}${s.partial?' <span class="reason">(tähän asti)</span>':""}</td>
+      <td class="num">${fmt(s.cAll?.avg)}${i?diff(today.cAll,s.cAll):""}</td><td class="num">${fmt(s.cAll?.max)}</td>
+      <td class="num">${fmt(s.prod?.avg)}</td><td class="num">${fmt(s.wind?.avg)}${i?diff(today.wind,s.wind):""}</td></tr>`).join("")+
+    `</tbody>`;
+}
+
+function renderInsights(){
+  const out=[]; const add=(t,sev="--accent")=>out.push(`<li style="--sev:var(${sev})">${t}</li>`);
+  const w=last(RT.wind), cap=lastOf(S.fc,FC.windCap), nuc=last(RT.nuc), n=last(RT.net), c=last(RT.cons), f=last(RT.freq), now=Date.now();
+  if(f && Math.abs(f.v-50)>0.1) add(`Taajuus ${fmt(f.v,3)} Hz poikkeaa normaalialueesta (49,9–50,1 Hz).`,"--bad");
+  const nucOut = S.umm.filter(u=>u.kind==="ydin" && u.start<=now && (!u.stop||u.stop>now) && (u.unavailable||0)>0);
+  const nucSoon = S.umm.filter(u=>u.kind==="ydin" && u.start>now && u.start<now+7*864e5);
+  if(nucOut.length) add(`Ydinvoimaa poissa: ${nucOut.map(u=>`${esc(u.unit)} ${fmt(u.unavailable)} MW (${esc(reasonFi(u.reason).toLowerCase()||"syy ei tiedossa")}, arvio ${dt(u.stop)})`).join("; ")}.`, nucOut.some(u=>!u.planned)?"--bad":"--warn");
+  else if(nuc) add(`Ydinvoima ${fmt(nuc.v)} MW, ei voimassa olevia käytettävyysrajoituksia.`);
+  if(nucSoon.length) add(`Tulossa viikon sisällä: ${nucSoon.map(u=>`${esc(u.unit)} ${dt(u.start)}`).join("; ")}.`,"--warn");
+  const otherOut = S.umm.filter(u=>u.kind!=="ydin" && !u.planned && u.start<=now && (!u.stop||u.stop>now));
+  if(otherOut.length) add(`Suunnittelemattomia rajoituksia: ${otherOut.slice(0,3).map(u=>`${esc(u.unit)} −${fmt(u.unavailable)} MW`).join(", ")}.`,"--bad");
+  if(w&&cap){ const u=w.v/cap.v*100; add(`Tuulivoima tuottaa ${fmt(w.v)} MW, eli ${fmt(u)} % kapasiteetista${u>60?" (vahva tuulipäivä)":u<10?" (lähes tyyntä)":""}.`, u<10?"--warn":"--accent"); }
+  if(n&&c) add(n.v>0 ? `Suomi tuo ${fmt(n.v)} MW, eli ${fmt(n.v/c.v*100)} % kulutuksesta.` : `Suomi vie ${fmt(-n.v)} MW naapurimaihin.`, n.v>0&&n.v/c.v>0.25?"--warn":"--accent");
+  const P=S.prices; if(P.length){
+    const t0=dayStart()+864e5, tm=P.filter(p=>p.t>=t0);
+    if(tm.length){
+      const mx=tm.reduce((a,b)=>b.v>a.v?b:a), mn=tm.reduce((a,b)=>b.v<a.v?b:a), neg=tm.filter(p=>p.v<0).length;
+      add(`Huomenna kallein jakso klo ${hhmm(mx.t)} (${fmt(mx.v,2)} snt/kWh), halvin klo ${hhmm(mn.t)} (${fmt(mn.v,2)}).${neg?` Negatiivisia hintoja ${neg*15} min.`:""}`, mx.v>30?"--warn":"--accent");
+    }
+    const pn=priceNow(); if(pn && pn.v<0) add(`Spot-hinta on nyt negatiivinen (${fmt(pn.v,2)} snt/kWh).`,"--hyd");
+  }
+  const wf=S.fc[FC.windF]||[]; if(wf.length && w){
+    const next=wf.filter(p=>p.t>now && p.t<now+864e5); if(next.length){
+      const lo=next.reduce((a,b)=>b.v<a.v?b:a);
+      if(lo.v < w.v*0.4) add(`Tuulivoiman ennustetaan laskevan ${fmt(lo.v)} MW:iin noin klo ${hhmm(lo.t)}.`,"--warn");
+    }
+  }
+  const H=S.hist; if(H&&H.years&&c){
+    const y=Object.keys(H.years).sort().pop(); const hc=H.years[y]?.[124];
+    if(hc&&hc.length){ const h=new Date().getHours(); const ref=hc.filter(([t])=>new Date(t).getHours()===h).map(x=>x[1]);
+      if(ref.length){ const r=ref.reduce((a,b)=>a+b,0)/ref.length, d=c.v/r*100-100; if(Math.abs(d)>8) add(`Kulutus on ${fmt(Math.abs(d))} % ${d>0?"korkeampi":"matalampi"} kuin samaan aikaan vuonna ${y}.`); }
+    }
+  }
+  $("insights").innerHTML = out.join("") || "<li>Ei poikkeamia.</li>";
+}
+
+$("refresh").onclick=refresh;
+let rz; addEventListener("resize",()=>{clearTimeout(rz); rz=setTimeout(render,200);});
+matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change",render);
+refresh();
+setInterval(()=>{ if(!document.hidden) refresh(); }, 5*60*1000);
+</script>
+</body>
+</html>
