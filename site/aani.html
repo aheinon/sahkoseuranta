@@ -12,7 +12,7 @@
 .clock{position:absolute;left:16px;top:12px;font-family:var(--f-disp);font-size:28px;font-weight:700;pointer-events:none}
 .clock small{display:block;font:500 13px var(--f-mono);color:var(--muted)}
 .play{font:600 18px var(--f-disp);padding:10px 22px}
-.bar{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
+.playbar{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
 #scrub{flex:1 1 240px;accent-color:var(--accent)}
 .voices{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 20px;margin:0;padding:0;list-style:none;font-size:14px}
 .voices li{display:flex;gap:10px;align-items:baseline}
@@ -33,7 +33,7 @@
 </header>
 <p class="lead">Suomen sähköjärjestelmä äänimaisemana. Taajuus soi perussävelenä, ydinvoima matalana pohjasointina ja tuuli kohinana. Kallis sähkö riitelee, ja tuonti kuuluu vasemmalta kumahtavana kellona, vienti oikealta kirkkaana.</p>
 
-<div class="bar">
+<div class="playbar">
   <button class="btn primary play" id="play" type="button">▶ Soita</button>
   <select id="mode" aria-label="Tila">
     <option value="live">Viimeiset 24 h · 2 min silmukka</option>
