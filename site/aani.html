@@ -31,7 +31,7 @@
     <nav class="nav"><a href="./">← Sähkötilanne</a><a href="kaksoispaiva.html">Kaksoispäivä</a><a href="mitajos.html">Mitä jos</a><a href="aani.html" aria-current="page">Verkon ääni</a></nav>
   </div>
 </header>
-<p class="lead">Suomen sähköjärjestelmä äänimaisemana. Taajuus soi perussävelenä, ydinvoima matalana pohjasointina ja tuuli kohinana. Kallis sähkö riitelee, ja tuonti kuuluu vasemmalta kumahtavana kellona, vienti oikealta kirkkaana.</p>
+<p class="lead">Suomen sähköjärjestelmä äänimaisemana. Taajuus soi perussävelenä, ydinvoima matalana pohjasointina ja tuuli kohinana. Hinta tikittää: mitä korkeampi ja nopeampi pulssi, sitä kalliimpaa sähkö on, ja hintapiikki soittaa hälytyksen. Tuonti kuuluu vasemmalta kumahtavana kellona, vienti oikealta kirkkaana.</p>
 
 <div class="playbar">
   <button class="btn primary play" id="play" type="button">▶ Soita</button>
@@ -51,16 +51,17 @@
 
 <section class="panel">
   <div class="head"><h2>Äänet</h2><span class="hmeta">arvot soivalla hetkellä</span></div>
+  <div class="playbar"><button class="btn" id="scale" type="button">Kuuntele hinta-asteikko</button><span class="hmeta" id="scaleNow">soittaa luokat halvimmasta kalleimpaan</span></div>
   <ul class="voices">
     <li><i style="background:var(--ink)"></i><b>Perussävel</b> <span id="vfLbl">taajuus</span><span class="num" id="vF">–</span></li>
     <li><i style="background:var(--nuc)"></i><b>Pohjasointi</b> <span>ydinvoima</span><span class="num" id="vN">–</span></li>
     <li><i style="background:var(--wind)"></i><b>Kohina</b> <span>tuulivoima</span><span class="num" id="vW">–</span></li>
     <li><i style="background:var(--hyd)"></i><b>Kvintti</b> <span>vesivoima</span><span class="num" id="vH">–</span></li>
-    <li><i style="background:var(--bad)"></i><b>Riitasointu</b> <span>hinta</span><span class="num" id="vP">–</span></li>
+    <li><i style="background:var(--bad)"></i><b>Pulssi</b> <span id="vPband">hinta</span><span class="num" id="vP">–</span></li>
     <li><i style="background:var(--chp)"></i><b>Kellot</b> <span>tuonti ← · → vienti</span><span class="num" id="vI">–</span></li>
   </ul>
 </section>
-<p class="hmeta" id="audioState" role="status">Paina Soita. (versio 3)</p>
+<p class="hmeta" id="audioState" role="status">Paina Soita.</p>
 <div class="err" id="err"></div>
 <footer>Data: Fingrid avoin data (CC BY 4.0), porssisahko.net, sahkotin.fi. Aikakone käyttää vuorokausikeskiarvoja, joten siinä perussävel seuraa kulutusta taajuuden sijaan.</footer>
 </div>
@@ -68,7 +69,18 @@
 <script src="lib.js"></script>
 <script>
 const MODES = { live:{dur:120}, machine:{dur:600} };
-const A = { ctx:null, playing:false, mode:"live", frames:[], pos:0, t0:0, bellAcc:0, nodes:null };
+const A = { ctx:null, playing:false, mode:"live", frames:[], pos:0, t0:0, bellAcc:0, nodes:null, nextPulse:0, band:-1 };
+// Hintaluokat (€/MWh, alv 0): sävel A-molli-pentatonisesta asteikosta ja pulssin väli sekunteina
+const BANDS = [
+  {max:0,        n:"negatiivinen",  f:220.0, iv:1.6},
+  {max:10,       n:"lähes ilmainen",f:261.6, iv:1.3},
+  {max:30,       n:"halpa",         f:293.7, iv:1.0},
+  {max:60,       n:"tavallinen",    f:329.6, iv:0.75},
+  {max:100,      n:"kallis",        f:392.0, iv:0.5},
+  {max:200,      n:"hyvin kallis",  f:440.0, iv:0.32},
+  {max:Infinity, n:"hintapiikki",   f:523.3, iv:0.18}
+];
+const bandOf = p => p==null ? -1 : BANDS.findIndex(b=>p<b.max);
 
 // ---------- data ----------
 async function buildLive(){
@@ -103,7 +115,7 @@ function noiseBuffer(ctx){
 function setup(){
   const ctx=new (window.AudioContext||window.webkitAudioContext)();
   const master=ctx.createGain(); master.gain.value=+$("vol").value;
-  const comp=ctx.createDynamicsCompressor(); const makeup=ctx.createGain(); makeup.gain.value=2.2; master.connect(comp).connect(makeup).connect(ctx.destination);
+  const comp=ctx.createDynamicsCompressor(); const makeup=ctx.createGain(); makeup.gain.value=1.6; const lim=ctx.createDynamicsCompressor(); lim.threshold.value=-4; lim.knee.value=0; lim.ratio.value=20; lim.attack.value=0.001; lim.release.value=0.1; const out=ctx.createGain(); out.gain.value=0.85; master.connect(comp).connect(makeup).connect(lim).connect(out).connect(ctx.destination);
   const verb=ctx.createConvolver(); { const len=ctx.sampleRate*2.5, ir=ctx.createBuffer(2,len,ctx.sampleRate); for(let c=0;c<2;c++){ const d=ir.getChannelData(c); for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,3); } verb.buffer=ir; }
   const wet=ctx.createGain(); wet.gain.value=0.35; verb.connect(wet).connect(master);
   const osc=(type,freq,dest,g=0)=>{ const o=ctx.createOscillator(); o.type=type; o.frequency.value=freq; const gn=ctx.createGain(); gn.gain.value=g; o.connect(gn).connect(dest); o.start(); return {o,g:gn}; };
@@ -121,6 +133,23 @@ function setup(){
   const wg=ctx.createGain(); wg.gain.value=0; ns.connect(bp).connect(wg); wg.connect(master); wg.connect(verb); ns.start();
   A.nodes={ctx,master,nucA,nucB,tone,dis,hyd,crystal,bp,wg,verb};
 }
+function pluck(freq, vol, t, dur=0.18){
+  const {ctx,master,verb}=A.nodes;
+  const o=ctx.createOscillator(), o2=ctx.createOscillator(), g=ctx.createGain();
+  o.type="triangle"; o.frequency.value=freq; o2.type="sine"; o2.frequency.value=freq*2;
+  const g2=ctx.createGain(); g2.gain.value=0.35; o2.connect(g2).connect(g);
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(vol,t+0.005); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g); g.connect(master); g.connect(verb);
+  o.start(t); o2.start(t); o.stop(t+dur+0.05); o2.stop(t+dur+0.05);
+}
+function alarm(){
+  const t=A.nodes.ctx.currentTime+0.02;
+  [784,659.3,523.3,784,659.3,523.3].forEach((f,i)=>pluck(f,0.28,t+i*0.11,0.16));
+}
+function sparkle(){
+  const t=A.nodes.ctx.currentTime+0.02;
+  [880,1046.5,1318.5,1760].forEach((f,i)=>pluck(f,0.12,t+i*0.07,0.4));
+}
 function bell(freq, pan){
   const {ctx,master,verb}=A.nodes, t=ctx.currentTime;
   const o=ctx.createOscillator(), o2=ctx.createOscillator(), g=ctx.createGain(), p=ctx.createStereoPanner();
@@ -135,12 +164,21 @@ function voice(fr, dt){
   const N=A.nodes, t=N.ctx.currentTime, k=0.25;
   const base = fr.f!=null ? 220*Math.pow(2,(fr.f-50)*5) : 165*Math.pow(2,((fr.c||9500)-9500)/4000);
   N.tone.o.frequency.setTargetAtTime(base,t,k); N.tone.g.gain.setTargetAtTime(0.16,t,k);
-  N.dis.o.frequency.setTargetAtTime(base*1.414,t,k); N.dis.g.gain.setTargetAtTime(clamp(((fr.p??0)-80)/250)*0.12,t,k);
+  N.dis.o.frequency.setTargetAtTime(base*1.414,t,k); N.dis.g.gain.setTargetAtTime(clamp(((fr.p??0)-200)/300)*0.05,t,k);
   N.hyd.o.frequency.setTargetAtTime(base*1.5,t,k); N.hyd.g.gain.setTargetAtTime(clamp((fr.h||0)/3200)*0.07,t,k);
   N.crystal.g.gain.setTargetAtTime((fr.p!=null&&fr.p<=0)?0.025:0,t,k);
   const nucG=clamp((fr.n||0)/4400)*0.09; N.nucA.g.gain.setTargetAtTime(nucG,t,k); N.nucB.g.gain.setTargetAtTime(nucG,t,k);
   const wn=clamp((fr.w||0)/(A.mode==="live"?8000:6000));
   N.wg.gain.setTargetAtTime(0.02+wn*0.35,t,k); N.bp.frequency.setTargetAtTime(300+wn*1400,t,k);
+  // hintapulssi
+  const bi=bandOf(fr.p);
+  if(bi>=0){
+    if(bi>=6 && A.band<6) alarm();
+    if(bi===0 && A.band!==0) sparkle();
+    A.band=bi;
+    if(A.nextPulse<t) A.nextPulse=t+0.05;
+    while(A.nextPulse<t+0.12){ pluck(BANDS[bi].f, 0.10+bi*0.03, A.nextPulse); A.nextPulse+=BANDS[bi].iv; }
+  }
   A.bellAcc += Math.abs(fr.i||0)/1000*dt*0.8;
   if(A.bellAcc>=1){ A.bellAcc=0; (fr.i||0)>0 ? bell(196,-0.7) : bell(784,0.7); }
 }
@@ -179,7 +217,7 @@ function readout(fr){
   $("clock").firstChild.textContent=fr.label; $("clockSub").textContent=fr.sub||"";
   $("vF").textContent = fr.f!=null ? fmt(fr.f,3)+" Hz" : fmt(fr.c)+" MW"; $("vfLbl").textContent = fr.f!=null ? "taajuus" : "kulutus";
   $("vN").textContent=fmt(fr.n)+" MW"; $("vW").textContent=fmt(fr.w)+" MW"; $("vH").textContent=fmt(fr.h)+" MW";
-  $("vP").textContent=fr.p==null?"–":fmt(fr.p,1)+" €/MWh"; $("vI").textContent=(fr.i>=0?"← ":"→ ")+fmt(Math.abs(fr.i||0))+" MW";
+  $("vP").textContent=fr.p==null?"–":fmt(fr.p,1)+" €/MWh"; { const b=bandOf(fr.p); $("vPband").textContent = b>=0 ? BANDS[b].n : "hinta"; } $("vI").textContent=(fr.i>=0?"← ":"→ ")+fmt(Math.abs(fr.i||0))+" MW";
 }
 
 // ---------- ohjaus ----------
@@ -213,6 +251,21 @@ function unlockIOS(){
   el.play().catch(()=>{}); A.unlock=el;
 }
 function audioStatus(msg){ $("audioState").textContent=msg; }
+$("scale").onclick=async()=>{
+  try{
+    if(!A.nodes) setup(); unlockIOS(); await A.nodes.ctx.resume();
+    A.nodes.master.gain.setTargetAtTime(+$("vol").value,A.nodes.ctx.currentTime,0.05);
+    let t=A.nodes.ctx.currentTime+0.1;
+    BANDS.forEach((b,i)=>{
+      for(let k=0;k<4;k++) pluck(b.f,0.10+i*0.03,t+k*Math.min(b.iv,0.45));
+      const at=t; setTimeout(()=>{ $("scaleNow").textContent=`${b.n} (${i===0?"alle 0":i===6?"yli 200":BANDS[i-1].max+"–"+b.max} €/MWh)`; }, (at-A.nodes.ctx.currentTime)*1000);
+      t+=4*Math.min(b.iv,0.45)+0.5;
+    });
+    setTimeout(()=>{ alarm(); $("scaleNow").textContent="hälytys: hinta nousee piikkiin"; }, (t-A.nodes.ctx.currentTime)*1000);
+    setTimeout(()=>{ sparkle(); $("scaleNow").textContent="kimallus: hinta painuu negatiiviseksi"; }, (t+1.2-A.nodes.ctx.currentTime)*1000);
+    setTimeout(()=>{ $("scaleNow").textContent="soittaa luokat halvimmasta kalleimpaan"; if(!A.playing) A.nodes.master.gain.setTargetAtTime(0,A.nodes.ctx.currentTime,0.3); }, (t+3-A.nodes.ctx.currentTime)*1000);
+  }catch(e){ audioStatus("Asteikon soitto epäonnistui: "+e.message); }
+};
 addEventListener("error",e=>audioStatus("Virhe: "+(e.message||e.error)));
 addEventListener("unhandledrejection",e=>audioStatus("Virhe: "+(e.reason&&e.reason.message||e.reason)));
 if(!(window.AudioContext||window.webkitAudioContext)) audioStatus("Tämä selain ei tue Web Audiota, joten ääni ei toimi tässä näkymässä. Avaa sivu Chromessa.");
