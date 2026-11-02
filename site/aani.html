@@ -40,7 +40,7 @@
     <option value="machine">Aikakone 2015 → nyt · 10 min</option>
   </select>
   <label class="hmeta" for="vol">Äänenvoimakkuus</label>
-  <input type="range" id="vol" min="0" max="1" step="0.05" value="0.6" style="width:120px;accent-color:var(--accent)">
+  <input type="range" id="vol" min="0" max="1" step="0.05" value="0.8" style="width:120px;accent-color:var(--accent)">
 </div>
 
 <div class="stage">
@@ -60,6 +60,7 @@
     <li><i style="background:var(--chp)"></i><b>Kellot</b> <span>tuonti ← · → vienti</span><span class="num" id="vI">–</span></li>
   </ul>
 </section>
+<p class="hmeta" id="audioState" role="status">Ääni ei ole vielä käynnissä. iPhonessa äänetön tila (sivukytkin) voi mykistää selaimen äänen.</p>
 <div class="err" id="err"></div>
 <footer>Data: Fingrid avoin data (CC BY 4.0), porssisahko.net, sahkotin.fi. Aikakone käyttää vuorokausikeskiarvoja, joten siinä perussävel seuraa kulutusta taajuuden sijaan.</footer>
 </div>
@@ -102,15 +103,15 @@ function noiseBuffer(ctx){
 function setup(){
   const ctx=new (window.AudioContext||window.webkitAudioContext)();
   const master=ctx.createGain(); master.gain.value=+$("vol").value;
-  const comp=ctx.createDynamicsCompressor(); master.connect(comp).connect(ctx.destination);
+  const comp=ctx.createDynamicsCompressor(); const makeup=ctx.createGain(); makeup.gain.value=2.2; master.connect(comp).connect(makeup).connect(ctx.destination);
   const verb=ctx.createConvolver(); { const len=ctx.sampleRate*2.5, ir=ctx.createBuffer(2,len,ctx.sampleRate); for(let c=0;c<2;c++){ const d=ir.getChannelData(c); for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,3); } verb.buffer=ir; }
   const wet=ctx.createGain(); wet.gain.value=0.35; verb.connect(wet).connect(master);
   const osc=(type,freq,dest,g=0)=>{ const o=ctx.createOscillator(); o.type=type; o.frequency.value=freq; const gn=ctx.createGain(); gn.gain.value=g; o.connect(gn).connect(dest); o.start(); return {o,g:gn}; };
   // pohjasointi: kaksi hieman eri vireistä sahaa alipäästön läpi
-  const lp=ctx.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=260; lp.connect(master); lp.connect(verb);
-  const nucA=osc("sawtooth",55,lp), nucB=osc("sawtooth",55.4,lp);
+  const lp=ctx.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=700; lp.connect(master); lp.connect(verb);
+  const nucA=osc("sawtooth",110,lp), nucB=osc("sawtooth",110.6,lp);
   // perussävel ja riitasointu
-  const tone=osc("sine",220,master), toneVerb=ctx.createGain(); toneVerb.gain.value=0.5; tone.g.connect(toneVerb).connect(verb);
+  const tone=osc("triangle",220,master), toneVerb=ctx.createGain(); toneVerb.gain.value=0.5; tone.g.connect(toneVerb).connect(verb);
   const dis=osc("triangle",311,master); dis.g.connect(verb);
   const hyd=osc("sine",330,master); hyd.g.connect(verb);
   const crystal=osc("sine",1760,verb);
@@ -125,7 +126,7 @@ function bell(freq, pan){
   const o=ctx.createOscillator(), o2=ctx.createOscillator(), g=ctx.createGain(), p=ctx.createStereoPanner();
   o.type="sine"; o.frequency.value=freq; o2.type="sine"; o2.frequency.value=freq*2.76;
   const g2=ctx.createGain(); g2.gain.value=0.3; o2.connect(g2).connect(g);
-  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.09,t+0.01); g.gain.exponentialRampToValueAtTime(0.0001,t+2.4);
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.22,t+0.01); g.gain.exponentialRampToValueAtTime(0.0001,t+2.4);
   p.pan.value=pan; o.connect(g).connect(p); p.connect(master); p.connect(verb);
   o.start(t); o2.start(t); o.stop(t+2.5); o2.stop(t+2.5);
 }
@@ -133,13 +134,13 @@ const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
 function voice(fr, dt){
   const N=A.nodes, t=N.ctx.currentTime, k=0.25;
   const base = fr.f!=null ? 220*Math.pow(2,(fr.f-50)*5) : 165*Math.pow(2,((fr.c||9500)-9500)/4000);
-  N.tone.o.frequency.setTargetAtTime(base,t,k); N.tone.g.gain.setTargetAtTime(0.07,t,k);
-  N.dis.o.frequency.setTargetAtTime(base*1.414,t,k); N.dis.g.gain.setTargetAtTime(clamp(((fr.p??0)-80)/250)*0.06,t,k);
-  N.hyd.o.frequency.setTargetAtTime(base*1.5,t,k); N.hyd.g.gain.setTargetAtTime(clamp((fr.h||0)/3200)*0.035,t,k);
+  N.tone.o.frequency.setTargetAtTime(base,t,k); N.tone.g.gain.setTargetAtTime(0.16,t,k);
+  N.dis.o.frequency.setTargetAtTime(base*1.414,t,k); N.dis.g.gain.setTargetAtTime(clamp(((fr.p??0)-80)/250)*0.12,t,k);
+  N.hyd.o.frequency.setTargetAtTime(base*1.5,t,k); N.hyd.g.gain.setTargetAtTime(clamp((fr.h||0)/3200)*0.07,t,k);
   N.crystal.g.gain.setTargetAtTime((fr.p!=null&&fr.p<=0)?0.025:0,t,k);
-  const nucG=clamp((fr.n||0)/4400)*0.06; N.nucA.g.gain.setTargetAtTime(nucG,t,k); N.nucB.g.gain.setTargetAtTime(nucG,t,k);
+  const nucG=clamp((fr.n||0)/4400)*0.09; N.nucA.g.gain.setTargetAtTime(nucG,t,k); N.nucB.g.gain.setTargetAtTime(nucG,t,k);
   const wn=clamp((fr.w||0)/(A.mode==="live"?8000:6000));
-  N.wg.gain.setTargetAtTime(wn*0.22,t,k); N.bp.frequency.setTargetAtTime(300+wn*1400,t,k);
+  N.wg.gain.setTargetAtTime(0.02+wn*0.35,t,k); N.bp.frequency.setTargetAtTime(300+wn*1400,t,k);
   A.bellAcc += Math.abs(fr.i||0)/1000*dt*0.8;
   if(A.bellAcc>=1){ A.bellAcc=0; (fr.i||0)>0 ? bell(196,-0.7) : bell(784,0.7); }
 }
@@ -202,11 +203,23 @@ async function load(mode){
   A.pos = 0; readout(frameAt(0));
 }
 function stop(){ A.playing=false; $("play").textContent="▶ Soita"; if(A.nodes) A.nodes.master.gain.setTargetAtTime(0,A.nodes.ctx.currentTime,0.2); }
+// iOS: hiljainen <audio>-silmukka siirtää äänen mediakanavalle, jolloin äänetön tila ei mykistä Web Audiota
+function unlockIOS(){
+  if(A.unlock) return;
+  const sr=8000, n=sr/2, buf=new ArrayBuffer(44+n*2), v=new DataView(buf), w=(o,str)=>[...str].forEach((c,i)=>v.setUint8(o+i,c.charCodeAt(0)));
+  w(0,"RIFF"); v.setUint32(4,36+n*2,true); w(8,"WAVEfmt "); v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+  v.setUint32(24,sr,true); v.setUint32(28,sr*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true); w(36,"data"); v.setUint32(40,n*2,true);
+  const el=document.createElement("audio"); el.src=URL.createObjectURL(new Blob([buf],{type:"audio/wav"})); el.loop=true; el.setAttribute("playsinline","");
+  el.play().catch(()=>{}); A.unlock=el;
+}
+function audioStatus(msg){ $("audioState").textContent=msg; }
 $("play").onclick=async()=>{
-  if(!A.frames.length) return;
+  if(!A.frames.length){ audioStatus("Dataa ei ole ladattu, joten soitettavaa ei ole. Päivitä sivu."); return; }
   if(A.playing){ stop(); return; }
   if(!A.nodes) setup();
-  await A.nodes.ctx.resume();
+  unlockIOS();
+  try{ await A.nodes.ctx.resume(); }catch(e){}
+  audioStatus(A.nodes.ctx.state==="running" ? "Ääni käynnissä. Jos et kuule mitään, tarkista laitteen äänenvoimakkuus ja iPhonessa äänetön tila." : `Selain ei käynnistänyt ääntä (tila: ${A.nodes.ctx.state}). Kokeile painaa Soita uudelleen.`);
   A.nodes.master.gain.setTargetAtTime(+$("vol").value,A.nodes.ctx.currentTime,0.3);
   if(A.mode==="machine" && A.pos>=A.frames.length-1) A.pos=0;
   A.playing=true; last=performance.now(); $("play").textContent="❚❚ Pysäytä";
