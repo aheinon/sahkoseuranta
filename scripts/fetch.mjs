@@ -23,11 +23,18 @@ async function fg(ids, start, end){
   if(!KEY) throw new Error("FINGRID_API_KEY puuttuu");
   let rows = [], page = 1;
   for(;;){
-    const wait = 2200 - (Date.now() - lastCall); if(wait > 0) await sleep(wait);   // 1 pyyntö / 2 s
-    lastCall = Date.now();
     const q = new URLSearchParams({ datasets: ids.join(","), startTime: start.toISOString(), endTime: end.toISOString(),
       format: "json", pageSize: "20000", page: String(page), sortBy: "startTime", sortOrder: "asc" });
-    const r = await fetch(`${FG}/data?${q}`, { headers: { "x-api-key": KEY } });
+    let r;
+    for(let attempt = 0; attempt < 4; attempt++){
+      const wait = 3000 - (Date.now() - lastCall); if(wait > 0) await sleep(wait);   // raja 1 pyyntö / 2 s, pidetään väljyyttä
+      lastCall = Date.now();
+      r = await fetch(`${FG}/data?${q}`, { headers: { "x-api-key": KEY } });
+      if(r.status !== 429) break;
+      const retry = +(r.headers.get("retry-after") || 0);
+      console.warn(`Fingrid 429, yritetään uudelleen (${attempt + 1})`);
+      await sleep(Math.max(retry * 1000, 3000) * (attempt + 1));
+    }
     if(!r.ok) throw new Error(`Fingrid ${r.status}: ${(await r.text()).slice(0,200)}`);
     const j = await r.json();
     rows = rows.concat(Array.isArray(j) ? j : (j.data || []));
