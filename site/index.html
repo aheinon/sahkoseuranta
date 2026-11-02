@@ -93,6 +93,16 @@ footer a{color:var(--accent)}
 .umm td{vertical-align:top}
 .umm .reason{color:var(--muted);font-size:12.5px}
 .stale{color:var(--warn)}
+.util{display:grid;grid-template-columns:minmax(90px,auto) minmax(0,1fr) auto auto;gap:10px 14px;align-items:center}
+.util .nm{font-weight:500}
+.util .sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
+.util .track{position:relative;height:14px;border-radius:3px;background:var(--grid);overflow:hidden}
+.util .range{position:absolute;top:0;bottom:0;opacity:.28}
+.util .fill{position:absolute;left:0;top:3px;bottom:3px;border-radius:2px}
+.util .avail{position:absolute;top:-1px;bottom:-1px;width:0;border-left:2px dashed var(--ink)}
+.util .mw{font-family:var(--f-mono);font-size:13px;color:var(--muted);text-align:right;white-space:nowrap}
+.util .pct{font-family:var(--f-disp);font-size:20px;font-weight:600;text-align:right;min-width:3.2em;font-variant-numeric:tabular-nums}
+@media (max-width:560px){.util{grid-template-columns:minmax(0,1fr) auto}.util .track{grid-column:1/-1;order:3}.util .mw{display:none}}
 </style>
 </head>
 <body>
@@ -123,6 +133,11 @@ footer a{color:var(--accent)}
 <section class="panel">
   <div class="head"><h2>Tilannekuva</h2><span class="hmeta">automaattisesti datasta</span></div>
   <ul class="insights" id="insights"><li>Ladataan…</li></ul>
+</section>
+
+<section class="panel">
+  <div class="head"><h2>Käyttöaste nyt</h2><span class="hmeta">tuotanto / kapasiteetti · palkin vaalea alue = 24 h vaihteluväli</span></div>
+  <div class="util" id="util"><div class="empty">Ei tuotantodataa</div></div>
 </section>
 
 <div class="grid2">
@@ -176,7 +191,9 @@ footer a{color:var(--accent)}
 "use strict";
 const RT = { prod:192, cons:193, net:194, wind:181, nuc:188, hyd:191, chp:201, ind:202,
              freq:177, state:209, co2c:265, co2p:266, se1:87, se3:89, ee:180, no:187 };
-const FC = { windF:245, solarF:248, consF:166, windCap:268 };
+const FC = { windF:245, solarF:248, consF:166, windCap:268, solarCap:267 };
+// Nimellistehot (MW). Ydinvoima: OL1 890, OL2 890, OL3 1 600, Loviisa 1–2 2 × 507. Vesivoima: noin 3 200 MW (arvio).
+const NUC_UNITS = 4394, HYDRO_CAP = 3200;
 const RES = [
   {id:317, n:"FCR-N, hinta", u:"€/MW,h"}, {id:318, n:"FCR-D ylös, hinta", u:"€/MW,h"},
   {id:52, n:"aFRR ylös, hinta", u:"€/MW,h"}, {id:51, n:"aFRR alas, hinta", u:"€/MW,h"},
@@ -226,7 +243,7 @@ function priceNow(){ const n=Date.now(); return S.prices.find(p=>p.t<=n && n<(p.
 const dayStart = (d=new Date()) => { const x=new Date(d); x.setHours(0,0,0,0); return +x; };
 
 function render(){
-  for(const f of [renderStatus,renderTiles,renderMix,renderFlows,renderUmm,renderPrices,renderForecast,renderRes,renderHist,renderInsights]){
+  for(const f of [renderStatus,renderTiles,renderUtil,renderMix,renderFlows,renderUmm,renderPrices,renderForecast,renderRes,renderHist,renderInsights]){
     try{ f(); }catch(e){ console.error(f.name, e); }
   }
 }
@@ -240,6 +257,33 @@ function renderStatus(){
   $("stateText").textContent = "Järjestelmän tila: " + (st ? st[0] : "–");
   $("stateSub").textContent = s ? "Fingrid, " + hhmm(s.t) : "Fingridin tilatieto";
   $("freq").textContent = f ? fmt(f.v,3)+" Hz" : "–";
+}
+
+function renderUtil(){
+  const now=Date.now(), rows=[];
+  const range=(id,cap)=>{ const a=(S.rt[id]||[]).map(p=>p.v/cap*100); return a.length?[Math.min(...a),Math.max(...a)]:null; };
+  // ydinvoima: käytettävissä = nimellisteho − voimassa olevat UMM-rajoitukset (yksikkökohtaisesti suurin)
+  const per=new Map();
+  for(const u of S.umm) if(u.kind==="ydin" && u.start<=now && (!u.stop||u.stop>now)) per.set(u.unit, Math.max(per.get(u.unit)||0, u.unavailable||0));
+  const nucOut=[...per.values()].reduce((a,b)=>a+b,0), nucAvail=Math.max(0,NUC_UNITS-nucOut);
+  const nuc=last(RT.nuc), wind=last(RT.wind), hyd=last(RT.hyd), wcap=lastOf(S.fc,FC.windCap), scap=lastOf(S.fc,FC.solarCap);
+  if(nuc) rows.push({n:"Ydinvoima", sub:nucOut?`käytettävissä ${fmt(nucAvail)} MW (UMM)`:"kaikki yksiköt käytettävissä", v:nuc.v, cap:NUC_UNITS, c:"--nuc", rg:range(RT.nuc,NUC_UNITS), avail:nucOut?nucAvail:null});
+  if(wind&&wcap) rows.push({n:"Tuulivoima", sub:"kapasiteetti Fingridin ennusteesta", v:wind.v, cap:wcap.v, c:"--wind", rg:range(RT.wind,wcap.v)});
+  if(hyd) rows.push({n:"Vesivoima", sub:"kapasiteetti arvio", v:hyd.v, cap:HYDRO_CAP, c:"--hyd", rg:range(RT.hyd,HYDRO_CAP)});
+  const sf=(S.fc[FC.solarF]||[]).filter(p=>p.t<=now).pop();
+  if(sf&&scap) rows.push({n:"Aurinkovoima", sub:"arvio ennusteesta, ei mitattu", v:sf.v, cap:scap.v, c:"--sun", rg:null});
+  if(!rows.length) return;
+  $("util").innerHTML=rows.map(r=>{
+    const pct=r.v/r.cap*100, cl=x=>Math.max(0,Math.min(100,x));
+    return `<div class="nm">${r.n}<span class="sub">${r.sub}</span></div>
+      <div class="track" role="img" aria-label="${r.n} ${fmt(pct)} %">
+        ${r.rg?`<div class="range" style="left:${cl(r.rg[0])}%;width:${cl(r.rg[1])-cl(r.rg[0])}%;background:var(${r.c})"></div>`:""}
+        <div class="fill" style="width:${cl(pct)}%;background:var(${r.c})"></div>
+        ${r.avail!=null?`<div class="avail" style="left:${cl(r.avail/r.cap*100)}%" title="käytettävissä"></div>`:""}
+      </div>
+      <div class="mw">${fmt(r.v)} / ${fmt(r.cap)} MW</div>
+      <div class="pct">${fmt(pct)} %</div>`;
+  }).join("");
 }
 
 function setTile(id,html,note){ $(id).innerHTML = html; if(note!=null) $(id+"-n").textContent = note; }

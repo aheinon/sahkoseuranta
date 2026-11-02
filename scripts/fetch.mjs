@@ -11,7 +11,7 @@ const TZ = "Europe/Helsinki";
 
 // Fingridin aineistot
 const RT = [192,193,194,181,188,191,201,202,177,209,265,266,87,89,180,187]; // reaaliaikaiset, 3 min
-const FC = [245,248,166,268];                                             // ennusteet + tuulikapasiteetti
+const FC = [245,248,166,268,267];                                           // ennusteet + tuulikapasiteetti
 const RES = [317,318,52,51,244,106,319];                                  // reservit ja säätö
 const HIST = [124,74,75];                                                 // kulutus, tuotanto, tuuli (15 min / 1 h)
 const HIST_YEARS = 3;
@@ -73,6 +73,7 @@ async function umm(){
     const units = [...(m.generationUnits||[]), ...(m.productionUnits||[]), ...(m.transmissionUnits||[])];
     for(const u of units){
       if(u.areaName && u.areaName !== "FI" && m.messageType === 1) continue;
+      if(m.messageType === 3 && !/\bFI\b/.test(u.name || "")) continue;   // vain Suomen rajayhteydet
       for(const p of u.timePeriods || []){
         const s = Date.parse(p.eventStart), e = Date.parse(p.eventStop);
         if(isNaN(s) || (e && e < from) || s > to) continue;
