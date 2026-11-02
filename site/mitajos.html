@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mitä jos -kone</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="common.css">
+<style>
+.tile .val small{font-size:13px}
+.delta{font-family:var(--f-mono);font-size:13px}
+.preset{display:flex;flex-wrap:wrap;gap:6px}
+.warn{font-size:13px;color:var(--muted);border-left:3px solid var(--warn);padding-left:10px;max-width:80ch}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div>
+    <h1>Mitä jos -kone</h1>
+    <nav class="nav"><a href="./">← Sähkötilanne</a><a href="kaksoispaiva.html">Kaksoispäivä</a><a href="mitajos.html" aria-current="page">Mitä jos</a><a href="aani.html">Verkon ääni</a></nav>
+  </div>
+  <div class="hmeta"><label for="year">Sääpohjana vuosi</label> <select id="year"></select></div>
+</header>
+<p class="lead">Ajaa valitun vuoden tunti tunnilta uudelleen muutetulla sähköjärjestelmällä. Kulutus ja sää ovat todellisia, tuotantorakennetta muutetaan säätimillä. Hinta lähtee saman vuoden toteutuneista tuntihinnoista, joita siirretään mallilla sen mukaan, miten jäännöskuorma muuttuu.</p>
+
+<section class="panel">
+  <div class="head"><h2>Muutokset</h2><div class="preset" id="presets"></div></div>
+  <div class="controls">
+    <div class="slider"><label for="sWind">Tuulivoimaa lisää</label><output id="oWind"></output><input type="range" id="sWind" min="0" max="20" step="0.5" value="0"><small>GW, saman vuoden tuuliprofiililla</small></div>
+    <div class="slider"><label for="sSun">Aurinkovoimaa lisää</label><output id="oSun"></output><input type="range" id="sSun" min="0" max="10" step="0.5" value="0"><small>GW, laskennallinen profiili (käyttöaste 10 %)</small></div>
+    <div class="slider"><label for="sNuc">Ydinvoiman muutos</label><output id="oNuc"></output><input type="range" id="sNuc" min="-4400" max="3000" step="100" value="0"><small>MW, tasainen (OL3 = 1 600 MW)</small></div>
+    <div class="slider"><label for="sCons">Kulutuksen muutos</label><output id="oCons"></output><input type="range" id="sCons" min="-20" max="60" step="1" value="0"><small>%, esim. datakeskukset ja sähköistyminen</small></div>
+    <div class="slider"><label for="sBatP">Akusto, teho</label><output id="oBatP"></output><input type="range" id="sBatP" min="0" max="6000" step="100" value="0"><small>MW, lataa päivän halvimmilla ja purkaa kalleimmilla tunneilla, hyötysuhde 88 %</small></div>
+    <div class="slider"><label for="sBatH">Akusto, kesto</label><output id="oBatH"></output><input type="range" id="sBatH" min="1" max="8" step="1" value="2"><small>tuntia täydellä teholla</small></div>
+    <div class="slider"><label for="sFlex">Joustava kuorma (esim. elektrolyysi)</label><output id="oFlex"></output><input type="range" id="sFlex" min="0" max="5000" step="100" value="0"><small>MW, käy vain kun hinta alittaa kynnyksen</small></div>
+    <div class="slider"><label for="sThr">Joustavan kuorman kynnyshinta</label><output id="oThr"></output><input type="range" id="sThr" min="0" max="150" step="5" value="30"><small>€/MWh</small></div>
+  </div>
+</section>
+
+<div class="tiles" id="kpi"></div>
+
+<div class="grid2">
+  <section class="panel">
+    <div class="head"><h2>Hinnan pysyvyyskäyrä</h2><span class="hmeta">€/MWh · tunnit järjestettynä</span></div>
+    <div class="legend"><span><i style="background:var(--oth)"></i>Toteutunut</span><span><i style="background:var(--accent)"></i>Skenaario</span></div>
+    <div class="chart" id="durChart"></div>
+  </section>
+  <section class="panel">
+    <div class="head"><h2>Hintamalli</h2><span class="hmeta" id="fitMeta"></span></div>
+    <div class="chart" id="fitChart"></div>
+  </section>
+</div>
+
+<section class="panel">
+  <div class="head"><h2>Vuoden kallein viikko</h2><span class="hmeta" id="weekMeta"></span></div>
+  <div class="legend"><span><i style="background:var(--oth)"></i>Toteutunut</span><span><i style="background:var(--accent)"></i>Skenaario</span></div>
+  <div class="chart" id="weekChart"></div>
+</section>
+
+<p class="warn">Tämä on havainnollistava malli, ei ennuste. Vesi- ja lämpövoima, rajasiirrot ja naapurimaiden tilanne pidetään ennallaan. Hinnan muutos riippuu vain jäännöskuorman muutoksesta (kulutus − tuuli − aurinko − ydin + jousto) saman vuoden toteutuneen hinta–jäännöskuorma-riippuvuuden mukaan. Tuonnin muutos on arvio: jäännöskuorman muutos katetaan tuonnilla tai viennillä. Yli 4 000 MW:n tuonti- tai vientitarve ylittää suunnilleen nykyiset rajasiirtoyhteydet.</p>
+<div class="err" id="err"></div>
+</div>
+
+<script src="lib.js"></script>
+<script>
+const S = { rows:[], model:null, base:null, year:null };
+const SL = ["sWind","sSun","sNuc","sCons","sBatP","sBatH","sFlex","sThr"];
+const LIMIT = 4000;
+const PRESETS = [
+  {n:"Nykyhetki", v:{}},
+  {n:"OL3 pois", v:{sNuc:-1600}},
+  {n:"Tuulivoimaa 2×", v:{sWind:"x2"}},
+  {n:"Datakeskusbuumi", v:{sCons:25, sWind:6}},
+  {n:"Akustot ja vety", v:{sBatP:3000, sBatH:4, sFlex:2500, sThr:30, sWind:8}},
+];
+
+function solarProfile(rows){
+  // Laskennallinen aurinkoprofiili Etelä-Suomeen (61° N, 23,5° E), normitettu käyttöasteeseen 10 %
+  const lat=61*Math.PI/180;
+  const raw=rows.map(r=>{
+    const d=new Date(r.t+1800e3), doy=(d-Date.UTC(d.getUTCFullYear(),0,1))/864e5;
+    const dec=23.44*Math.PI/180*Math.sin(2*Math.PI*(284+doy)/365);
+    const solar=d.getUTCHours()+d.getUTCMinutes()/60+23.5/15, H=(solar-12)*15*Math.PI/180;
+    const se=Math.sin(lat)*Math.sin(dec)+Math.cos(lat)*Math.cos(dec)*Math.cos(H);
+    return se>0 ? Math.pow(se,1.3) : 0;
+  });
+  const m=mean(raw)||1; return raw.map(v=>v/m*0.10);
+}
+function fitModel(R, P){
+  const W=250, bins=new Map();
+  R.forEach((r,i)=>{ if(P[i]==null) return; const b=Math.floor(r/W); if(!bins.has(b)) bins.set(b,[]); bins.get(b).push(P[i]); });
+  let pts=[...bins.entries()].filter(([,a])=>a.length>=5).sort((a,b)=>a[0]-b[0])
+    .map(([b,a])=>{ a.sort((x,y)=>x-y); return {x:(b+0.5)*W, y:a[Math.floor(a.length/2)], n:a.length}; });
+  for(let i=1;i<pts.length;i++) pts[i].y=Math.max(pts[i].y, pts[i-1].y);   // monotoninen: suurempi jäännöskuorma ei laske hintaa
+  const k=pts.length, slope = k>3 ? Math.max(0.01,(pts[k-1].y-pts[k-4].y)/(pts[k-1].x-pts[k-4].x)) : 0.05;
+  const f = r => {
+    if(r<=pts[0].x) return pts[0].y - Math.max(0,(pts[0].x-r))*0.004;      // ylijäämässä hinta valuu kohti negatiivista
+    if(r>=pts[k-1].x) return pts[k-1].y + (r-pts[k-1].x)*slope;
+    let lo=0, hi=k-1; while(hi-lo>1){ const mid=(lo+hi)>>1; if(pts[mid].x<=r) lo=mid; else hi=mid; }
+    const a=pts[lo], b=pts[hi]; return a.y+(b.y-a.y)*(r-a.x)/(b.x-a.x);
+  };
+  return {f, pts};
+}
+
+async function loadYear(y){
+  const keys=Array.from({length:12},(_,i)=>`${y}-${pad(i+1)}`);
+  const rows=(await Promise.all(keys.map(loadMonthRows))).flat().filter(r=>r.cons!=null&&r.wind!=null&&r.nuc!=null);
+  if(!rows.length){ $("err").textContent="Vuoden dataa ei löytynyt arkistosta."; return; }
+  S.rows=rows; S.year=y;
+  S.sun=solarProfile(rows);
+  const w=rows.map(r=>r.wind).sort((a,b)=>a-b); S.windCap=w[Math.floor(w.length*0.995)]/0.92;
+  S.R0=rows.map(r=>r.cons-r.wind-r.nuc);
+  S.model=fitModel(S.R0, rows.map(r=>r.price));
+  S.act=rows.map(r=>r.price); S.f0=S.R0.map(S.model.f);
+  const P=rows.map(r=>r.price), Ph=S.R0.map(S.model.f), ok=P.map((p,i)=>p!=null?i:-1).filter(i=>i>=0);
+  const pm=mean(ok.map(i=>P[i])), r2=1-sum(ok.map(i=>(P[i]-Ph[i])**2))/sum(ok.map(i=>(P[i]-pm)**2));
+  S.r2=r2;
+  // vuoden kallein viikko toteutuneilla hinnoilla
+  let best=0, bi=0; for(let i=0;i+168<=rows.length;i+=24){ const s=sum(rows.slice(i,i+168).map(r=>r.price||0)); if(s>best){best=s;bi=i;} } S.week=bi;
+  S.base=simulate({sWind:0,sSun:0,sNuc:0,sCons:0,sBatP:0,sBatH:2,sFlex:0,sThr:30});
+  drawFit(); update();
+}
+
+function simulate(v){
+  const {rows,model,sun}=S, fm=model.f, n=rows.length;
+  // Hinta = toteutunut hinta + mallin ennustama muutos jäännöskuorman muuttuessa.
+  // Näin todelliset piikit ja negatiiviset tunnit säilyvät, malli vain siirtää niitä.
+  const price=(i,r)=> S.act[i]!=null ? S.act[i] + fm(r) - S.f0[i] : fm(r);
+  const wScale=1+v.sWind*1000/S.windCap, cons=v.sCons/100;
+  const R=new Float64Array(n);
+  for(let i=0;i<n;i++){ const r=rows[i]; R[i]=r.cons*(1+cons) - r.wind*wScale - sun[i]*v.sSun*1000 - Math.max(0,r.nuc+v.sNuc); }
+  // joustava kuorma
+  let flexE=0, flexCost=0; const flexOn=new Uint8Array(n);
+  if(v.sFlex>0) for(let i=0;i<n;i++) if(price(i,R[i]+v.sFlex)<v.sThr){ R[i]+=v.sFlex; flexOn[i]=1; }
+  // akusto: päivittäin halvimmat tunnit lataukseen, kalleimmat purkuun
+  const ch=new Uint8Array(n), dis=new Uint8Array(n), eff=0.88;
+  if(v.sBatP>0){
+    const p1=Array.from(R,(r,i)=>price(i,r));
+    for(let d=0; d<n; d+=24){
+      const idx=[]; for(let i=d;i<Math.min(n,d+24);i++) idx.push(i);
+      idx.sort((a,b)=>p1[a]-p1[b]);
+      for(let k=0;k<v.sBatH && k<idx.length/2;k++){
+        const lo=idx[k], hi=idx[idx.length-1-k];
+        // tarkistetaan kannattavuus hinnoilla, joihin akuston oma vaikutus on jo laskettu
+        const pLo=price(lo,R[lo]+v.sBatP), pHi=price(hi,R[hi]-v.sBatP*eff);
+        if(pHi*eff <= pLo+2) break;
+        ch[lo]=1; dis[hi]=1; R[lo]+=v.sBatP; R[hi]-=v.sBatP*eff;
+      }
+    }
+  }
+  const P=Array.from(R,(r,i)=>price(i,r));
+  let rev=0; for(let i=0;i<n;i++){ if(ch[i]) rev-=v.sBatP*P[i]; if(dis[i]) rev+=v.sBatP*eff*P[i]; if(flexOn[i]){ flexE+=v.sFlex; flexCost+=v.sFlex*P[i]; } }
+  // tuonti: alkuperäinen nettotuonti + jäännöskuorman muutos
+  let impE=0, over=0, overExp=0;
+  for(let i=0;i<n;i++){ const imp=(rows[i].net??0)+(R[i]-S.R0[i]); impE+=imp; if(imp>LIMIT) over++; if(imp<-LIMIT) overExp++; }
+  return { P, avg:mean(P), spikes:P.filter(p=>p>200).length, neg:P.filter(p=>p<=0).length,
+    impTWh:impE/1e6, over, overExp, rev, flexE, flexAvg:flexE?flexCost/flexE:null };
+}
+
+function vals(){ const o={}; for(const id of SL) o[id]=+$(id).value; return o; }
+function labels(v){
+  $("oWind").textContent=`+${fmt(v.sWind,1)} GW`; $("oSun").textContent=`+${fmt(v.sSun,1)} GW`;
+  $("oNuc").textContent=`${v.sNuc>0?"+":""}${fmt(v.sNuc)} MW`; $("oCons").textContent=`${v.sCons>0?"+":""}${fmt(v.sCons)} %`;
+  $("oBatP").textContent=`${fmt(v.sBatP)} MW`; $("oBatH").textContent=`${fmt(v.sBatH)} h · ${fmt(v.sBatP*v.sBatH)} MWh`;
+  $("oFlex").textContent=`${fmt(v.sFlex)} MW`; $("oThr").textContent=`< ${fmt(v.sThr)} €/MWh`;
+}
+let tm; function update(){ clearTimeout(tm); tm=setTimeout(_update,30); }
+function _update(){
+  if(!S.base) return;
+  const v=vals(); labels(v);
+  const s=simulate(v), b=S.base;
+  const tile=(l,val,u,base,lowerBetter=true,d=0)=>{
+    const dl=val-base, cls=Math.abs(dl)<1e-9?"":((dl>0)===lowerBetter?"up":"down");
+    return `<div class="tile"><span class="lbl">${l}</span><span class="val">${fmt(val,d)}<small>${u}</small></span><span class="note delta ${cls}">${Math.abs(dl)<1e-9?"ei muutosta":`${dl>0?"+":"−"}${fmt(Math.abs(dl),d)} vs toteutunut`}</span></div>`; };
+  let html = tile("Spot-hinta ka", s.avg, "€/MWh", b.avg, true, 1)
+    + tile("Hintapiikit > 200 €", s.spikes, "h", b.spikes)
+    + tile("Hinta ≤ 0", s.neg, "h", b.neg, false)
+    + tile("Nettotuonti", s.impTWh, "TWh/v", b.impTWh, true, 1)
+    + tile("Tuontitarve > 4 GW", s.over, "h", b.over)
+    + tile("Vientitarve > 4 GW", s.overExp, "h", b.overExp);
+  if(v.sBatP>0) html += `<div class="tile"><span class="lbl">Akuston arbitraasi</span><span class="val">${fmt(s.rev/1e6,1)}<small>M€/v</small></span><span class="note">${fmt(s.rev/(v.sBatP*v.sBatH)/1000,0)} k€ per MWh kapasiteettia</span></div>`;
+  if(v.sFlex>0) html += `<div class="tile"><span class="lbl">Joustava kuorma</span><span class="val">${fmt(s.flexE/1000)}<small>GWh/v</small></span><span class="note">käyttöaste ${fmt(s.flexE/(v.sFlex*S.rows.length)*100)} % · ka ${fmt(s.flexAvg,1)} €/MWh</span></div>`;
+  $("kpi").innerHTML=html;
+  drawDuration(s); drawWeek(s);
+}
+
+function drawDuration(s){
+  const el=$("durChart"), n=S.rows.length;
+  const sorted=a=>[...a].filter(x=>x!=null).sort((x,y)=>y-x);
+  const A=sorted(S.rows.map(r=>r.price)), B=sorted(S.base.P), C=sorted(s.P);
+  const ymax=Math.min(600, Math.max(B[Math.floor(n*0.005)], C[Math.floor(n*0.005)], 50)*1.1), ymin=Math.min(0, B.at(-1), C.at(-1), A.at(-1));
+  const xt=[0,1000,2000,3000,4000,5000,6000,7000,8000].filter(x=>x<=n).map(x=>({x,label:x?fmt(x):"0"}));
+  const f=frame(el,240,0,n,Math.max(-100,ymin),ymax,{xticks:xt});
+  const line=(a,col,extra="")=>{ const step=Math.max(1,Math.floor(a.length/600)); const pts=[]; for(let i=0;i<a.length;i+=step) pts.push({x:i,y:Math.min(ymax,Math.max(f.sy?Math.max(-100,ymin):0,a[i]))}); pts.push({x:a.length-1,y:Math.max(Math.max(-100,ymin),a.at(-1))}); return `<path d="${pathOf(f,pts)}" fill="none" stroke="${col}" stroke-width="1.8" ${extra}/>`; };
+  el.innerHTML=`<svg viewBox="0 0 ${f.W} ${f.H}" role="img" aria-label="Hinnan pysyvyyskäyrä">${f.g}${line(B,css("--oth"))}${line(C,css("--accent"))}</svg>`;
+}
+function drawFit(){
+  const el=$("fitChart"), {pts}=S.model;
+  const sample=[]; const step=Math.max(1,Math.floor(S.rows.length/1500));
+  for(let i=0;i<S.rows.length;i+=step) if(S.rows[i].price!=null) sample.push({x:S.R0[i], y:S.rows[i].price});
+  const xs=sample.map(p=>p.x), ys=sample.map(p=>p.y).sort((a,b)=>a-b);
+  const ymax=Math.min(600, ys[Math.floor(ys.length*0.995)]*1.1), ymin=Math.min(0,ys[0]);
+  const x0=Math.min(...xs), x1=Math.max(...xs);
+  const xt=niceTicks(x0,x1,4).map(x=>({x,label:fmt(x/1000,1)+" GW"}));
+  const f=frame(el,240,x0,x1,Math.max(-100,ymin),ymax,{xticks:xt});
+  const dots=sample.map(p=>`<circle cx="${f.sx(p.x).toFixed(1)}" cy="${f.sy(Math.min(ymax,Math.max(-100,p.y))).toFixed(1)}" r="1.4" fill="${css("--oth")}" fill-opacity=".5"/>`).join("");
+  const curve=pts.filter(p=>p.x>=x0&&p.x<=x1).map(p=>({x:p.x,y:Math.min(ymax,p.y)}));
+  el.innerHTML=`<svg viewBox="0 0 ${f.W} ${f.H}" role="img" aria-label="Hinta jäännöskuorman funktiona">${f.g}${dots}<path d="${pathOf(f,curve)}" fill="none" stroke="${css("--accent")}" stroke-width="2.2"/></svg>`;
+  $("fitMeta").textContent=`hinta vs jäännöskuorma ${S.year} · selittää ${fmt(Math.max(0,S.r2)*100)} % vaihtelusta`;
+}
+function drawWeek(s){
+  const el=$("weekChart"), i0=S.week, n=Math.min(168,S.rows.length-i0);
+  const B=S.base.P.slice(i0,i0+n), C=s.P.slice(i0,i0+n);
+  const ymax=Math.min(800,Math.max(...B,...C,50)*1.08), ymin=Math.min(0,...B,...C);
+  const xt=Array.from({length:8},(_,d)=>({x:d*24,label:new Date(S.rows[Math.min(S.rows.length-1,i0+d*24)].t).toLocaleDateString("fi-FI",{weekday:"short",day:"numeric",month:"numeric"})})).filter(t=>t.x<n);
+  const f=frame(el,220,0,n,Math.max(-100,ymin),ymax,{xticks:xt});
+  const l=(a,col)=>`<path d="${pathOf(f,a.map((y,x)=>({x,y:Math.min(ymax,y)})))}" fill="none" stroke="${col}" stroke-width="1.8"/>`;
+  el.innerHTML=`<svg viewBox="0 0 ${f.W} ${f.H}" role="img" aria-label="Kallein viikko">${f.g}${l(B,css("--oth"))}${l(C,css("--accent"))}</svg>`;
+  $("weekMeta").textContent=`alkaen ${new Date(S.rows[i0].t).toLocaleDateString("fi-FI")} · €/MWh`;
+}
+
+async function init(){
+  const idx=await getJSON("archive/index.json");
+  if(!idx){ $("err").textContent="Arkistoa ei löytynyt."; return; }
+  const cnt={}; idx.months.forEach(m=>{ const y=m.slice(0,4); cnt[y]=(cnt[y]||0)+1; });
+  const years=Object.keys(cnt).filter(y=>cnt[y]===12).sort().reverse();
+  $("year").innerHTML=years.map(y=>`<option>${y}</option>`).join("");
+  $("presets").innerHTML=PRESETS.map((p,i)=>`<button class="btn" type="button" data-i="${i}">${p.n}</button>`).join("");
+  $("presets").querySelectorAll("button").forEach(b=>b.onclick=()=>{
+    const p=PRESETS[+b.dataset.i].v;
+    for(const id of SL) $(id).value = $(id).defaultValue;
+    for(const [k,val] of Object.entries(p)) $(k).value = val==="x2" ? Math.min(20, Math.round(S.windCap/500)/2) : val;
+    update();
+  });
+  for(const id of SL) $(id).addEventListener("input",update);
+  $("year").onchange=()=>loadYear($("year").value);
+  addEventListener("resize",()=>{ clearTimeout(window._rz); window._rz=setTimeout(()=>{ if(S.base){ drawFit(); _update(); } },200); });
+  await loadYear(years[0]);
+}
+init();
+</script>
+</body>
+</html>

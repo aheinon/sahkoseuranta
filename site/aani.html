@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Verkon ääni</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="common.css">
+<style>
+.stage{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+#cv{display:block;width:100%;height:340px}
+.clock{position:absolute;left:16px;top:12px;font-family:var(--f-disp);font-size:28px;font-weight:700;pointer-events:none}
+.clock small{display:block;font:500 13px var(--f-mono);color:var(--muted)}
+.play{font:600 18px var(--f-disp);padding:10px 22px}
+.bar{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
+#scrub{flex:1 1 240px;accent-color:var(--accent)}
+.voices{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 20px;margin:0;padding:0;list-style:none;font-size:14px}
+.voices li{display:flex;gap:10px;align-items:baseline}
+.voices i{flex:none;width:10px;height:10px;border-radius:50%;display:inline-block;transform:translateY(1px)}
+.voices b{font-weight:600}
+.voices span{color:var(--muted)}
+.voices .num{margin-left:auto;color:var(--ink);font-family:var(--f-mono);font-size:13px}
+@media (prefers-reduced-motion:reduce){#cv{height:200px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div>
+    <h1>Verkon ääni</h1>
+    <nav class="nav"><a href="./">← Sähkötilanne</a><a href="kaksoispaiva.html">Kaksoispäivä</a><a href="mitajos.html">Mitä jos</a><a href="aani.html" aria-current="page">Verkon ääni</a></nav>
+  </div>
+</header>
+<p class="lead">Suomen sähköjärjestelmä äänimaisemana. Taajuus soi perussävelenä, ydinvoima matalana pohjasointina ja tuuli kohinana. Kallis sähkö riitelee, ja tuonti kuuluu vasemmalta kumahtavana kellona, vienti oikealta kirkkaana.</p>
+
+<div class="bar">
+  <button class="btn primary play" id="play" type="button">▶ Soita</button>
+  <select id="mode" aria-label="Tila">
+    <option value="live">Viimeiset 24 h · 2 min silmukka</option>
+    <option value="machine">Aikakone 2015 → nyt · 10 min</option>
+  </select>
+  <label class="hmeta" for="vol">Äänenvoimakkuus</label>
+  <input type="range" id="vol" min="0" max="1" step="0.05" value="0.6" style="width:120px;accent-color:var(--accent)">
+</div>
+
+<div class="stage">
+  <canvas id="cv" aria-label="Äänimaiseman visualisointi"></canvas>
+  <div class="clock" id="clock">–<small id="clockSub"></small></div>
+</div>
+<input type="range" id="scrub" min="0" max="1000" value="0" aria-label="Kohta aikajanalla">
+
+<section class="panel">
+  <div class="head"><h2>Äänet</h2><span class="hmeta">arvot soivalla hetkellä</span></div>
+  <ul class="voices">
+    <li><i style="background:var(--ink)"></i><b>Perussävel</b> <span id="vfLbl">taajuus</span><span class="num" id="vF">–</span></li>
+    <li><i style="background:var(--nuc)"></i><b>Pohjasointi</b> <span>ydinvoima</span><span class="num" id="vN">–</span></li>
+    <li><i style="background:var(--wind)"></i><b>Kohina</b> <span>tuulivoima</span><span class="num" id="vW">–</span></li>
+    <li><i style="background:var(--hyd)"></i><b>Kvintti</b> <span>vesivoima</span><span class="num" id="vH">–</span></li>
+    <li><i style="background:var(--bad)"></i><b>Riitasointu</b> <span>hinta</span><span class="num" id="vP">–</span></li>
+    <li><i style="background:var(--chp)"></i><b>Kellot</b> <span>tuonti ← · → vienti</span><span class="num" id="vI">–</span></li>
+  </ul>
+</section>
+<div class="err" id="err"></div>
+<footer>Data: Fingrid avoin data (CC BY 4.0), porssisahko.net, sahkotin.fi. Aikakone käyttää vuorokausikeskiarvoja, joten siinä perussävel seuraa kulutusta taajuuden sijaan.</footer>
+</div>
+
+<script src="lib.js"></script>
+<script>
+const MODES = { live:{dur:120}, machine:{dur:600} };
+const A = { ctx:null, playing:false, mode:"live", frames:[], pos:0, t0:0, bellAcc:0, nodes:null };
+
+// ---------- data ----------
+async function buildLive(){
+  const j=await getJSON("data.json"); if(!j) throw new Error("data.json puuttuu");
+  const ser=id=>(j.rt[id]||[]);
+  const at=(arr,t)=>{ let lo=0,hi=arr.length-1; if(hi<0) return null; if(t<=arr[0][0]) return arr[0][1]; if(t>=arr[hi][0]) return arr[hi][1];
+    while(hi-lo>1){ const m=(lo+hi)>>1; if(arr[m][0]<=t) lo=m; else hi=m; } const a=arr[lo], b=arr[hi]; return a[1]+(b[1]-a[1])*(t-a[0])/(b[0]-a[0]); };
+  const base = ser(177).length>100 ? ser(177) : ser(193);
+  const prices=j.prices||[];
+  const price=t=>{ const p=prices.find(p=>p[0]<=t&&t<p[1]); return p?p[2]*10/1.255:null; };
+  return base.map(([t])=>({ t, f:at(ser(177),t), c:at(ser(193),t), w:at(ser(181),t), n:at(ser(188),t), h:at(ser(191),t), i:-(at(ser(194),t)||0), p:price(t),
+    label:new Date(t).toLocaleTimeString("fi-FI",{hour:"2-digit",minute:"2-digit"}), sub:new Date(t).toLocaleDateString("fi-FI",{weekday:"short",day:"numeric",month:"numeric"}) }));
+}
+async function buildMachine(){
+  const rows=await loadDaily(); if(!rows.length) throw new Error("Arkistoa ei löytynyt");
+  return rows.map(r=>({ t:Date.parse(r.d), f:null, c:r.c, w:r.w, n:r.n, h:r.h, i:r.i, p:r.p,
+    label:fiDate(r.d,{day:"numeric",month:"numeric",year:"numeric"}), sub:fiDate(r.d,{weekday:"long"}) }));
+}
+function frameAt(pos){
+  if(!isFinite(pos)) pos=0;
+  const F=A.frames, i=Math.min(F.length-2, Math.max(0, Math.floor(pos))), u=pos-i, a=F[i], b=F[i+1]||a;
+  const L=k=> a[k]==null ? b[k] : b[k]==null ? a[k] : a[k]+(b[k]-a[k])*u;
+  return { f:L("f"), c:L("c"), w:L("w"), n:L("n"), h:L("h"), i:L("i"), p:L("p"), label:a.label, sub:a.sub };
+}
+
+// ---------- ääni ----------
+function noiseBuffer(ctx){
+  const len=ctx.sampleRate*3, buf=ctx.createBuffer(2,len,ctx.sampleRate);
+  for(let ch=0;ch<2;ch++){ const d=buf.getChannelData(ch); let b=0; for(let i=0;i<len;i++){ b=0.97*b+0.03*(Math.random()*2-1); d[i]=b*4; } }
+  return buf;
+}
+function setup(){
+  const ctx=new (window.AudioContext||window.webkitAudioContext)();
+  const master=ctx.createGain(); master.gain.value=+$("vol").value;
+  const comp=ctx.createDynamicsCompressor(); master.connect(comp).connect(ctx.destination);
+  const verb=ctx.createConvolver(); { const len=ctx.sampleRate*2.5, ir=ctx.createBuffer(2,len,ctx.sampleRate); for(let c=0;c<2;c++){ const d=ir.getChannelData(c); for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,3); } verb.buffer=ir; }
+  const wet=ctx.createGain(); wet.gain.value=0.35; verb.connect(wet).connect(master);
+  const osc=(type,freq,dest,g=0)=>{ const o=ctx.createOscillator(); o.type=type; o.frequency.value=freq; const gn=ctx.createGain(); gn.gain.value=g; o.connect(gn).connect(dest); o.start(); return {o,g:gn}; };
+  // pohjasointi: kaksi hieman eri vireistä sahaa alipäästön läpi
+  const lp=ctx.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=260; lp.connect(master); lp.connect(verb);
+  const nucA=osc("sawtooth",55,lp), nucB=osc("sawtooth",55.4,lp);
+  // perussävel ja riitasointu
+  const tone=osc("sine",220,master), toneVerb=ctx.createGain(); toneVerb.gain.value=0.5; tone.g.connect(toneVerb).connect(verb);
+  const dis=osc("triangle",311,master); dis.g.connect(verb);
+  const hyd=osc("sine",330,master); hyd.g.connect(verb);
+  const crystal=osc("sine",1760,verb);
+  // tuuli
+  const ns=ctx.createBufferSource(); ns.buffer=noiseBuffer(ctx); ns.loop=true;
+  const bp=ctx.createBiquadFilter(); bp.type="bandpass"; bp.Q.value=0.8; bp.frequency.value=500;
+  const wg=ctx.createGain(); wg.gain.value=0; ns.connect(bp).connect(wg); wg.connect(master); wg.connect(verb); ns.start();
+  A.nodes={ctx,master,nucA,nucB,tone,dis,hyd,crystal,bp,wg,verb};
+}
+function bell(freq, pan){
+  const {ctx,master,verb}=A.nodes, t=ctx.currentTime;
+  const o=ctx.createOscillator(), o2=ctx.createOscillator(), g=ctx.createGain(), p=ctx.createStereoPanner();
+  o.type="sine"; o.frequency.value=freq; o2.type="sine"; o2.frequency.value=freq*2.76;
+  const g2=ctx.createGain(); g2.gain.value=0.3; o2.connect(g2).connect(g);
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.09,t+0.01); g.gain.exponentialRampToValueAtTime(0.0001,t+2.4);
+  p.pan.value=pan; o.connect(g).connect(p); p.connect(master); p.connect(verb);
+  o.start(t); o2.start(t); o.stop(t+2.5); o2.stop(t+2.5);
+}
+const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
+function voice(fr, dt){
+  const N=A.nodes, t=N.ctx.currentTime, k=0.25;
+  const base = fr.f!=null ? 220*Math.pow(2,(fr.f-50)*5) : 165*Math.pow(2,((fr.c||9500)-9500)/4000);
+  N.tone.o.frequency.setTargetAtTime(base,t,k); N.tone.g.gain.setTargetAtTime(0.07,t,k);
+  N.dis.o.frequency.setTargetAtTime(base*1.414,t,k); N.dis.g.gain.setTargetAtTime(clamp(((fr.p??0)-80)/250)*0.06,t,k);
+  N.hyd.o.frequency.setTargetAtTime(base*1.5,t,k); N.hyd.g.gain.setTargetAtTime(clamp((fr.h||0)/3200)*0.035,t,k);
+  N.crystal.g.gain.setTargetAtTime((fr.p!=null&&fr.p<=0)?0.025:0,t,k);
+  const nucG=clamp((fr.n||0)/4400)*0.06; N.nucA.g.gain.setTargetAtTime(nucG,t,k); N.nucB.g.gain.setTargetAtTime(nucG,t,k);
+  const wn=clamp((fr.w||0)/(A.mode==="live"?8000:6000));
+  N.wg.gain.setTargetAtTime(wn*0.22,t,k); N.bp.frequency.setTargetAtTime(300+wn*1400,t,k);
+  A.bellAcc += Math.abs(fr.i||0)/1000*dt*0.8;
+  if(A.bellAcc>=1){ A.bellAcc=0; (fr.i||0)>0 ? bell(196,-0.7) : bell(784,0.7); }
+}
+
+// ---------- kuva ----------
+const cv=$("cv"), g2=cv.getContext("2d");
+function draw(){
+  const dpr=devicePixelRatio||1, W=cv.clientWidth, H=cv.clientHeight;
+  if(!W||!H) return;
+  if(cv.width!==W*dpr){ cv.width=W*dpr; cv.height=H*dpr; }
+  g2.setTransform(dpr,0,0,dpr,0,0); g2.clearRect(0,0,W,H);
+  const F=A.frames; if(F.length<2) return;
+  const ch=[ {k:"n",c:"--nuc",max:4600}, {k:"h",c:"--hyd",max:3300}, {k:"w",c:"--wind",max:A.mode==="live"?8000:6000}, {k:"p",c:"--bad",max:300}, {k:"i",c:"--chp",max:4000,sym:true} ];
+  const top=60, band=(H-top-16)/ch.length, span=A.mode==="live"?120:200;   // näkyvä ikkuna kehyksinä
+  const x0=A.pos-span*0.75;
+  ch.forEach((c,ci)=>{
+    const y0=top+ci*band, col=css(c.c);
+    g2.strokeStyle=css("--grid"); g2.lineWidth=1; g2.beginPath(); g2.moveTo(0,y0+band-2); g2.lineTo(W,y0+band-2); g2.stroke();
+    g2.beginPath(); let started=false;
+    for(let px=0;px<=W;px+=2){
+      const pos=x0+px/W*span; if(pos<0||pos>F.length-1) continue;
+      const v=frameAt(pos)[c.k]; if(v==null) continue;
+      const nv=c.sym ? 0.5+clamp(v/c.max,-1,1)/2 : clamp(v/c.max);
+      const y=y0+band-4-nv*(band-8);
+      started?g2.lineTo(px,y):(g2.moveTo(px,y),started=true);
+    }
+    g2.strokeStyle=col; g2.lineWidth=2; g2.globalAlpha=1; g2.stroke();
+  });
+  const ph=W*0.75; g2.strokeStyle=css("--ink"); g2.globalAlpha=.6; g2.lineWidth=1.5; g2.beginPath(); g2.moveTo(ph,top-6); g2.lineTo(ph,H-10); g2.stroke(); g2.globalAlpha=1;
+  // taajuuspallo
+  const fr=frameAt(A.pos);
+  if(fr.f!=null){ const dx=clamp((fr.f-50)/0.1,-1,1); g2.fillStyle=Math.abs(fr.f-50)>0.1?css("--bad"):css("--accent"); g2.beginPath(); g2.arc(W-90+dx*60,30,8,0,7); g2.fill();
+    g2.fillStyle=css("--muted"); g2.font="11px "+css("--f-mono"); g2.textAlign="center"; g2.fillText("49,9",W-150,52); g2.fillText("50,0",W-90,52); g2.fillText("50,1",W-30,52); }
+}
+function readout(fr){
+  $("clock").firstChild.textContent=fr.label; $("clockSub").textContent=fr.sub||"";
+  $("vF").textContent = fr.f!=null ? fmt(fr.f,3)+" Hz" : fmt(fr.c)+" MW"; $("vfLbl").textContent = fr.f!=null ? "taajuus" : "kulutus";
+  $("vN").textContent=fmt(fr.n)+" MW"; $("vW").textContent=fmt(fr.w)+" MW"; $("vH").textContent=fmt(fr.h)+" MW";
+  $("vP").textContent=fr.p==null?"–":fmt(fr.p,1)+" €/MWh"; $("vI").textContent=(fr.i>=0?"← ":"→ ")+fmt(Math.abs(fr.i||0))+" MW";
+}
+
+// ---------- ohjaus ----------
+let last=0;
+function loop(now){
+  if(A.playing){
+    const dt=Math.min(0.1,(now-last)/1000); last=now;
+    A.pos += dt*(A.frames.length-1)/MODES[A.mode].dur;
+    if(A.pos>=A.frames.length-1) A.pos = A.mode==="live" ? 0 : A.frames.length-1;
+    if(A.mode==="machine" && A.pos>=A.frames.length-1) stop();
+    const fr=frameAt(A.pos); voice(fr,dt); readout(fr);
+    $("scrub").value=Math.round(A.pos/(A.frames.length-1)*1000);
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
+async function load(mode){
+  A.mode=mode; $("err").textContent="";
+  try{ A.frames = mode==="live" ? await buildLive() : await buildMachine(); }
+  catch(e){ A.frames=[]; $("err").textContent=e.message; return; }
+  A.pos = 0; readout(frameAt(0));
+}
+function stop(){ A.playing=false; $("play").textContent="▶ Soita"; if(A.nodes) A.nodes.master.gain.setTargetAtTime(0,A.nodes.ctx.currentTime,0.2); }
+$("play").onclick=async()=>{
+  if(!A.frames.length) return;
+  if(A.playing){ stop(); return; }
+  if(!A.nodes) setup();
+  await A.nodes.ctx.resume();
+  A.nodes.master.gain.setTargetAtTime(+$("vol").value,A.nodes.ctx.currentTime,0.3);
+  if(A.mode==="machine" && A.pos>=A.frames.length-1) A.pos=0;
+  A.playing=true; last=performance.now(); $("play").textContent="❚❚ Pysäytä";
+};
+$("vol").oninput=()=>{ if(A.nodes&&A.playing) A.nodes.master.gain.setTargetAtTime(+$("vol").value,A.nodes.ctx.currentTime,0.1); };
+$("mode").onchange=async()=>{ const was=A.playing; stop(); await load($("mode").value); if(was) $("play").click(); };
+$("scrub").oninput=()=>{ if(A.frames.length){ A.pos=+$("scrub").value/1000*(A.frames.length-1); readout(frameAt(A.pos)); } };
+load("live").then(()=>requestAnimationFrame(loop));
+</script>
+</body>
+</html>

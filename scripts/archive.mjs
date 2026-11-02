@@ -51,9 +51,9 @@ async function prices(start, end){
   return ((await r.json()).prices || []).map(p => [Date.parse(p.date), p.value]);
 }
 
+const TZF = new Intl.DateTimeFormat("en-CA",{timeZone:TZ,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"});
 function tzParts(ms){
-  const f = new Intl.DateTimeFormat("en-CA",{timeZone:TZ,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"});
-  const o = {}; for(const p of f.formatToParts(new Date(ms))) o[p.type] = +p.value; return o;
+  const o = {}; for(const p of TZF.formatToParts(new Date(ms))) o[p.type] = +p.value; return o;
 }
 function helsinkiMidnight(y, m, d){
   let g = Date.UTC(y, m-1, d);
@@ -97,7 +97,7 @@ const [fy, fm] = fromArg ? fromArg.split("-").map(Number) : (now.month === 1 ? [
 for(let y = fy, m = fm; y < now.year || (y === now.year && m <= now.month); m === 12 ? (y++, m = 1) : m++) months.push([y, m]);
 
 const recent = new Set(months.slice(-2).map(([y, m]) => ym(y, m)));
-const todo = months.filter(([y, m]) => mode === "force" || recent.has(ym(y, m)) || !existing.has(ym(y, m)));
+const todo = process.env.ARCHIVE_DAILY_ONLY ? [] : months.filter(([y, m]) => mode === "force" || recent.has(ym(y, m)) || !existing.has(ym(y, m)));
 console.log(`Kuukausia ${months.length}, haetaan ${todo.length}`);
 
 let fails = 0;
@@ -113,4 +113,34 @@ for(const [y, m] of todo){
 const list = [...existing].sort();
 await writeFile(`${DIR}/index.json`, JSON.stringify({ updated: Date.now(), months: list }));
 console.log(`index.json: ${list.length} kuukautta, ${list[0]} – ${list[list.length-1]}`);
+
+// Päivätason tiivistelmä koko arkistosta (Kaksoispäivä, Verkon ääni)
+// Kentät: d päivä, c kulutus, w tuuli, n ydin, h vesi, x CHP (kaukolämpö+teollisuus), i nettotuonti (MW, ka),
+//         p hinta ka, pmax, pmin (€/MWh alv 0), k kattavuus (tunteja kulutusdatalla)
+const days = new Map();
+for(const key of list){
+  let m; try { m = JSON.parse(await readFile(`${DIR}/${key}.json`, "utf8")); } catch { continue; }
+  for(let i = 0; i < m.hours; i++){
+    const p = tzParts(m.start + i * 3600e3);
+    const d = `${p.year}-${String(p.month).padStart(2,"0")}-${String(p.day).padStart(2,"0")}`;
+    if(!days.has(d)) days.set(d, { d, acc: {}, k: 0, pmax: -Infinity, pmin: Infinity });
+    const o = days.get(d), s = m.s;
+    const x = s.chp[i] != null || s.ind[i] != null ? (s.chp[i] || 0) + (s.ind[i] || 0) : null;
+    const vals = { c: s.cons[i], w: s.wind[i], n: s.nuc[i], h: s.hyd[i], x, i: s.net[i], p: s.price[i] };
+    for(const [f, v] of Object.entries(vals)) if(v != null){ (o.acc[f] ||= [0, 0]); o.acc[f][0] += v; o.acc[f][1]++; }
+    if(s.cons[i] != null) o.k++;
+    if(s.price[i] != null){ o.pmax = Math.max(o.pmax, s.price[i]); o.pmin = Math.min(o.pmin, s.price[i]); }
+  }
+}
+const daily = [...days.values()].filter(o => o.k >= 12).sort((a, b) => a.d < b.d ? -1 : 1).map(o => {
+  const r = { d: o.d, k: o.k };
+  for(const f of ["c","w","n","h","x","i"]) r[f] = o.acc[f] ? Math.round(o.acc[f][0] / o.acc[f][1]) : null;
+  r.p = o.acc.p ? Math.round(o.acc.p[0] / o.acc.p[1] * 10) / 10 : null;
+  r.pmax = isFinite(o.pmax) ? Math.round(o.pmax) : null; r.pmin = isFinite(o.pmin) ? Math.round(o.pmin) : null;
+  return r;
+});
+// sarakemuoto pienentää tiedostoa
+const cols = ["d","c","w","n","h","x","i","p","pmax","pmin","k"];
+await writeFile(`${DIR}/daily.json`, JSON.stringify({ updated: Date.now(), cols, rows: daily.map(r => cols.map(c => r[c])) }));
+console.log(`daily.json: ${daily.length} päivää`);
 if(fails) process.exitCode = 1;

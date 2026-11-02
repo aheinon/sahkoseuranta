@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kaksoispäivä</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="common.css">
+<style>
+.twin{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 16px;align-items:baseline}
+.twin .big{font-family:var(--f-disp);font-size:34px;font-weight:700;line-height:1.1}
+.cmp td.num{font-family:var(--f-mono)}
+.match{display:flex;flex-direction:column;gap:2px}
+.score{font-family:var(--f-mono);font-size:12.5px;color:var(--muted)}
+.btnlink{background:none;border:0;padding:0;color:var(--accent);cursor:pointer;font:inherit;text-decoration:underline;text-underline-offset:3px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div>
+    <h1>Kaksoispäivä</h1>
+    <nav class="nav"><a href="./">← Sähkötilanne</a><a href="kaksoispaiva.html" aria-current="page">Kaksoispäivä</a><a href="mitajos.html">Mitä jos</a><a href="aani.html">Verkon ääni</a></nav>
+  </div>
+  <div class="hctl" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <label for="qDate" class="hmeta">Vertailupäivä</label>
+    <input type="date" id="qDate" style="font:14px var(--f-mono);padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)">
+    <button class="btn" id="qToday" type="button">Viimeiset 24 h</button>
+  </div>
+</header>
+<p class="lead">Etsii vuodesta 2015 alkaen päivän, jonka sähköjärjestelmä muistutti eniten valittua päivää: kulutus, tuuli-, ydin-, vesi- ja CHP-tuotanto, nettotuonti ja vuodenaika. Kaksosen seuraavat päivät kertovat, mitä samankaltaisesta tilanteesta on ennen seurannut.</p>
+
+<section class="panel">
+  <div class="head"><h2 id="qTitle">Tänään</h2><span class="hmeta" id="qSub"></span></div>
+  <div class="twin" id="twinBox"><div class="empty">Lasketaan…</div></div>
+  <div style="overflow-x:auto"><table class="cmp" id="cmpTable"></table></div>
+</section>
+
+<div class="grid2">
+  <section class="panel">
+    <div class="head"><h2>Mitä kaksosta seurasi</h2><span class="hmeta">spot ka €/MWh, alv 0 · −3 … +7 vrk</span></div>
+    <div class="chart" id="afterChart"></div>
+    <ul class="insights" id="afterText"></ul>
+  </section>
+  <section class="panel">
+    <div class="head"><h2>Muut lähimmät</h2><span class="hmeta">pienempi etäisyys = samankaltaisempi</span></div>
+    <div style="overflow-x:auto"><table id="topTable"></table></div>
+  </section>
+</div>
+
+<section class="panel">
+  <div class="head"><h2>Vuoden oudoimmat päivät</h2>
+    <span class="hmeta"><label for="oddYear">Vuosi</label> <select id="oddYear"></select></span></div>
+  <p class="lead" style="font-size:13.5px">Päivät, joille ei löydy koko arkistosta lähellekään samanlaista päivää. Selitys kertoo, mikä suure poikkesi eniten saman kuukauden keskiarvosta.</p>
+  <div style="overflow-x:auto"><table id="oddTable"></table></div>
+</section>
+
+<div class="err" id="err"></div>
+<footer>Data: Fingrid avoin data (CC BY 4.0), sahkotin.fi. Etäisyys on painotettu euklidinen etäisyys standardoiduista päiväkeskiarvoista.</footer>
+</div>
+
+<script src="lib.js"></script>
+<script>
+const F = [ // suure, nimi, paino
+  {k:"c", n:"Kulutus", w:1.0}, {k:"w", n:"Tuulivoima", w:1.2}, {k:"n", n:"Ydinvoima", w:0.8},
+  {k:"h", n:"Vesivoima", w:0.6}, {k:"x", n:"CHP", w:0.6}, {k:"i", n:"Nettotuonti", w:1.0}
+];
+const SEASON_W = 0.9;
+let D = [], stats = {}, byDate = new Map(), liveDay = null;
+
+const doy = iso => { const [y,m,d]=iso.split("-").map(Number); return (Date.UTC(y,m-1,d)-Date.UTC(y,0,1))/864e5; };
+function vec(r){
+  const a = F.map(f => (r[f.k]-stats[f.k].m)/stats[f.k].s * f.w);
+  const t = 2*Math.PI*doy(r.d)/365.25;
+  a.push(Math.sin(t)*SEASON_W*1.41, Math.cos(t)*SEASON_W*1.41);
+  return a;
+}
+const dist = (a,b) => Math.sqrt(a.reduce((s,v,i)=>s+(v-b[i])**2,0));
+const complete = r => r && F.every(f=>r[f.k]!=null) && r.k>=20;
+const addDays = (iso,n) => { const [y,m,d]=iso.split("-").map(Number); const t=new Date(Date.UTC(y,m-1,d+n)); return t.toISOString().slice(0,10); };
+
+async function init(){
+  D = (await loadDaily()).filter(complete);
+  if(!D.length){ $("err").textContent="Arkistoa ei löytynyt. Aja GitHubissa työnkulku Päivitä historia-arkisto."; return; }
+  for(const f of F){ const v=D.map(r=>r[f.k]); const m=mean(v); stats[f.k]={m, s:Math.sqrt(mean(v.map(x=>(x-m)**2)))||1}; }
+  D.forEach(r=>{ r.v=vec(r); byDate.set(r.d,r); });
+  $("qDate").min=D[0].d; $("qDate").max=D[D.length-1].d;
+  // viimeiset 24 h reaaliaikadatasta
+  try{
+    const j = await getJSON("data.json");
+    const avg = id => { const a=(j.rt[id]||[]).map(p=>p[1]); return a.length?mean(a):null; };
+    const today = new Date(); const iso = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
+    const d0 = new Date(); d0.setHours(0,0,0,0);
+    const pr = (j.prices||[]).filter(p=>p[0]>=+d0 && p[0]<+d0+864e5).map(p=>p[2]*10/1.255);   // snt/kWh sis. alv → €/MWh alv 0
+    liveDay = { d: iso, c:avg(193), w:avg(181), n:avg(188), h:avg(191), x:(avg(201)||0)+(avg(202)||0), i:-(avg(194)||0), k:24,
+      p: pr.length?mean(pr):null, pmax: pr.length?Math.max(...pr):null, live:true };
+    if(complete(liveDay)) liveDay.v = vec(liveDay); else liveDay=null;
+  }catch(e){ liveDay=null; }
+  const years=[...new Set(D.map(r=>r.d.slice(0,4)))].reverse();
+  $("oddYear").innerHTML=years.map(y=>`<option>${y}</option>`).join("");
+  const h=location.hash.slice(1);
+  if(/^\d{4}-\d{2}-\d{2}$/.test(h) && byDate.has(h)) $("qDate").value=h;
+  run();
+  odd();
+}
+
+function run(){
+  const q = $("qDate").value ? byDate.get($("qDate").value) : liveDay || D[D.length-1];
+  if(!q) return;
+  if(!$("qDate").value && !liveDay) $("qDate").value=q.d;
+  const exclude = d => Math.abs((Date.parse(d)-Date.parse(q.d))/864e5) < 14;
+  const ranked = D.filter(r=>!exclude(r.d)).map(r=>({r, s:dist(q.v,r.v)})).sort((a,b)=>a.s-b.s);
+  const best = ranked[0].r;
+  $("qTitle").textContent = q.live ? "Viimeiset 24 h" : fiDate(q.d,{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+  $("qSub").textContent = `vertailtu ${fmt(ranked.length)} päivään`;
+  $("twinBox").innerHTML = `<span class="hmeta">Kaksonen</span><div class="match"><span class="big">${fiDate(best.d,{weekday:"short",day:"numeric",month:"numeric",year:"numeric"})}</span><span class="score">etäisyys ${fmt(ranked[0].s,2)} · ${similarity(ranked[0].s)}</span></div>`;
+  const row=(n,a,b,u,dg=0)=>`<tr><td>${n}</td><td class="num">${fmt(a,dg)}</td><td class="num">${fmt(b,dg)}</td><td>${u}</td></tr>`;
+  $("cmpTable").innerHTML=`<thead><tr><th></th><th class="num">${q.live?"Nyt":"Valittu"}</th><th class="num">Kaksonen</th><th></th></tr></thead><tbody>`+
+    F.map(f=>row(f.n,q[f.k],best[f.k],"MW")).join("")+row("Spot ka",q.p,best.p,"€/MWh",1)+row("Spot huippu",q.pmax,best.pmax,"€/MWh")+`</tbody>`;
+  // ympäröivät päivät
+  const win=[]; for(let k=-3;k<=7;k++){ const r=byDate.get(addDays(best.d,k)); win.push({k, r}); }
+  const pts=win.filter(w=>w.r&&w.r.p!=null);
+  const el=$("afterChart");
+  if(pts.length){
+    const ymax=Math.max(10,...pts.map(w=>w.r.pmax??w.r.p))*1.05;
+    const f=frame(el,220,-3.5,7.5,0,ymax,{xticks:win.map(w=>({x:w.k,label:w.k===0?"K":(w.k>0?"+":"")+w.k}))});
+    let g="";
+    for(const w of pts){ const x=f.sx(w.k-0.35), bw=f.sx(w.k+0.35)-x, y=f.sy(w.r.p);
+      g+=`<rect x="${x}" y="${y}" width="${bw}" height="${f.sy(0)-y}" fill="${css(w.k===0?"--ink":w.k>0?"--accent":"--oth")}"><title>${fiDate(w.r.d)} ka ${fmt(w.r.p,1)} €/MWh</title></rect>`;
+      if(w.r.pmax!=null) g+=`<line x1="${f.sx(w.k)}" x2="${f.sx(w.k)}" y1="${f.sy(w.r.pmax)}" y2="${y}" stroke="${css("--muted")}"/>`; }
+    el.innerHTML=`<svg viewBox="0 0 ${f.W} ${f.H}" role="img" aria-label="Kaksosen ympäröivien päivien hinnat">${f.g}${g}</svg>`;
+  }
+  // mitä seurasi: kaksosen ja viiden lähimmän tulevat päivät
+  const top=ranked.slice(0,5);
+  const next=n=>top.map(t=>byDate.get(addDays(t.r.d,n))).filter(r=>r&&r.p!=null);
+  const n1=next(1), n3=[1,2,3].flatMap(next);
+  const out=[];
+  const b1=byDate.get(addDays(best.d,1));
+  if(b1&&best.p!=null&&b1.p!=null) out.push(`Kaksosen jälkeisenä päivänä hinta ${b1.p>best.p?"nousi":"laski"} ${fmt(best.p,1)} → ${fmt(b1.p,1)} €/MWh ja tuuli oli ${fmt(b1.w)} MW.`);
+  if(n1.length) out.push(`Viiden lähimmän kaksosen seuraavan päivän hinta oli keskimäärin ${fmt(mean(n1.map(r=>r.p)),1)} €/MWh (vaihteluväli ${fmt(Math.min(...n1.map(r=>r.p)),0)}–${fmt(Math.max(...n1.map(r=>r.p)),0)}).`);
+  if(n3.length){ const imp=mean(n3.map(r=>r.i)); out.push(`Kolmen seuraavan päivän nettotuonti oli niissä keskimäärin ${fmt(Math.abs(imp))} MW ${imp>=0?"tuontia":"vientiä"}.`); }
+  const yrs=top.map(t=>t.r.d.slice(0,4)); out.push(`Lähimmät kaksoset ovat vuosilta ${[...new Set(yrs)].join(", ")}.`);
+  $("afterText").innerHTML=out.map(t=>`<li>${t}</li>`).join("");
+  $("topTable").innerHTML=`<thead><tr><th>Päivä</th><th class="num">Etäisyys</th><th class="num">Spot ka</th><th class="num">Tuuli</th></tr></thead><tbody>`+
+    ranked.slice(1,9).map(t=>`<tr><td><button class="btnlink" type="button" data-d="${t.r.d}">${fiDate(t.r.d,{weekday:"short",day:"numeric",month:"numeric",year:"numeric"})}</button></td><td class="num mono">${fmt(t.s,2)}</td><td class="num">${fmt(t.r.p,1)}</td><td class="num">${fmt(t.r.w)}</td></tr>`).join("")+`</tbody>`;
+  $("topTable").querySelectorAll("[data-d]").forEach(b=>b.onclick=()=>{ $("qDate").value=b.dataset.d; history.replaceState(null,"","#"+b.dataset.d); run(); scrollTo({top:0,behavior:"smooth"}); });
+}
+function similarity(s){ return s<0.4?"lähes identtinen":s<0.8?"hyvin samankaltainen":s<1.3?"samankaltainen":"etäinen kaksonen"; }
+
+function odd(){
+  const y=$("oddYear").value, days=D.filter(r=>r.d.startsWith(y));
+  // kuukausittaiset tavalliset arvot selitystä varten
+  const mstat={};
+  for(const r of D){ const m=r.d.slice(0,7); (mstat[m] ||= []).push(r); }
+  const mm={}; for(const m in mstat){ mm[m]={}; for(const f of F){ const v=mstat[m].map(r=>r[f.k]); const a=mean(v); mm[m][f.k]={m:a, s:Math.sqrt(mean(v.map(x=>(x-a)**2)))||1}; } }
+  const res=days.map(q=>{
+    let best=Infinity;
+    for(const r of D){ if(Math.abs(Date.parse(r.d)-Date.parse(q.d))<7*864e5) continue; const s=dist(q.v,r.v); if(s<best) best=s; }
+    const st=mm[q.d.slice(0,7)];
+    const z=F.map(f=>({f, z:(q[f.k]-st[f.k].m)/st[f.k].s})).sort((a,b)=>Math.abs(b.z)-Math.abs(a.z))[0];
+    return {q, s:best, z};
+  }).sort((a,b)=>b.s-a.s).slice(0,8);
+  $("oddTable").innerHTML=`<thead><tr><th>Päivä</th><th class="num">Etäisyys lähimpään</th><th>Mikä poikkesi</th><th class="num">Spot ka</th></tr></thead><tbody>`+
+    res.map(o=>`<tr><td><button class="btnlink" type="button" data-d="${o.q.d}">${fiDate(o.q.d,{weekday:"short",day:"numeric",month:"numeric",year:"numeric"})}</button></td><td class="num mono">${fmt(o.s,2)}</td>
+      <td>${o.z.f.n} ${fmt(Math.abs(o.z.z),1)} σ ${o.z.z>0?"yli":"alle"} kuukauden keskiarvon <span class="hmeta">(${fmt(o.q[o.z.f.k])} MW)</span></td><td class="num">${fmt(o.q.p,1)}</td></tr>`).join("")+`</tbody>`;
+  $("oddTable").querySelectorAll("[data-d]").forEach(b=>b.onclick=()=>{ $("qDate").value=b.dataset.d; history.replaceState(null,"","#"+b.dataset.d); run(); scrollTo({top:0,behavior:"smooth"}); });
+}
+
+$("qDate").onchange=()=>{ history.replaceState(null,"","#"+$("qDate").value); run(); };
+$("qToday").onclick=()=>{ $("qDate").value=""; history.replaceState(null,"",location.pathname); run(); };
+$("oddYear").onchange=odd;
+init();
+</script>
+</body>
+</html>

@@ -93,6 +93,9 @@ footer a{color:var(--accent)}
 .umm td{vertical-align:top}
 .umm .reason{color:var(--muted);font-size:12.5px}
 .stale{color:var(--warn)}
+.nav{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:14px;margin-top:4px}
+.nav a{color:var(--accent);text-decoration:none;border-bottom:1px solid transparent}
+.nav a:hover,.nav a[aria-current="page"]{border-bottom-color:var(--accent)}
 .hctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .hctl input{font:14px var(--f-mono);padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)}
 .seg{display:inline-flex}
@@ -118,6 +121,7 @@ footer a{color:var(--accent)}
   <div>
     <h1>Sähkötilanne</h1>
     <div class="hmeta"><span>Suomen sähköjärjestelmä · tarjousalue FI</span><span id="updated" class="mono">–</span></div>
+    <nav class="nav"><a href="./" aria-current="page">Sähkötilanne</a><a href="kaksoispaiva.html">Kaksoispäivä</a><a href="mitajos.html">Mitä jos</a><a href="aani.html">Verkon ääni</a></nav>
   </div>
   <div class="hmeta"><button class="btn" id="refresh" type="button">Päivitä</button></div>
 </header>
