@@ -311,32 +311,38 @@ function renderMix(){
     + `<span><i style="background:none;border-top:2px dashed var(--ink);height:0;width:14px;border-radius:0"></i>Kulutus</span>`;
 }
 
+// Suomen ääriviiva (pituus, leveys), karkeistettu. Ahvenanmaa ja saaristo jätetty pois.
+const FI_OUTLINE=[[22.95,59.82],[23.5,59.95],[24.6,60.12],[25.3,60.25],[26.3,60.4],[26.9,60.45],[27.8,60.55],[28.7,60.75],[29.6,61.25],[30.6,61.85],[31.5,62.6],[31.2,63.2],[30.0,63.8],[30.6,64.3],[29.8,64.9],[30.1,65.6],[29.2,66.0],[29.5,66.6],[29.0,66.95],[29.9,67.6],[28.7,68.1],[28.5,68.6],[28.9,68.9],[28.6,69.05],[29.3,69.4],[28.9,69.75],[28.2,69.9],[27.95,70.08],[27.0,69.92],[26.4,69.75],[25.8,69.45],[25.2,69.0],[24.2,68.75],[23.0,68.65],[22.2,68.95],[21.3,69.25],[20.55,69.06],[21.6,68.6],[22.4,68.45],[23.4,68.0],[23.7,67.5],[23.9,66.8],[23.65,66.3],[24.15,65.85],[25.0,65.6],[25.3,65.2],[25.45,64.95],[24.7,64.7],[24.2,64.4],[23.2,63.9],[22.4,63.55],[21.6,63.2],[21.3,62.8],[21.2,62.2],[21.5,61.6],[21.4,61.1],[21.6,60.7],[22.1,60.45],[22.5,60.2],[22.95,59.82]];
+// Yhteydet: liityntäpiste Suomessa, naapurin pää, nimiön sijainti
+const LINKS=[
+  {k:"no", n:"Norja",              fi:[27.6,69.55], ext:[29.6,70.25], lab:[30.2,70.45,"end"]},
+  {k:"se1",n:"SE1 Pohjois-Ruotsi", fi:[24.3,65.95], ext:[20.6,66.4],  lab:[16.2,67.7,"start"]},
+  {k:"se3",n:"SE3 Fenno-Skan",     fi:[21.6,61.15], ext:[18.0,60.55], lab:[16.2,61.6,"start"]},
+  {k:"ee", n:"Viro (Estlink)",     fi:[24.7,60.2],  ext:[25.0,59.15], lab:[25.0,58.75,"middle"]}
+];
 function renderFlows(){
   const el=$("flowMap");
   const L = {se1:last(RT.se1), se3:last(RT.se3), ee:last(RT.ee), no:last(RT.no)};
   if(!L.se1 && !L.se3 && !L.ee) return;
-  const W=360,H=330, fi={x:220,y:175};
-  const nodes = [
-    {k:"no", n:"Norja", x:250,y:30},
-    {k:"se1",n:"SE1 Pohjois-Ruotsi", x:70,y:85},
-    {k:"se3",n:"SE3 Fenno-Skan", x:60,y:225},
-    {k:"ee", n:"Viro (Estlink)", x:215,y:305}
-  ];
-  let g=`<defs><marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10Z" fill="context-stroke"/></marker></defs>`;
-  g += `<path d="M205,40 L265,55 L285,110 L300,190 L285,265 L240,290 L190,282 L170,240 L180,170 L175,110 Z" fill="${css("--accent")}" fill-opacity=".12" stroke="${css("--accent")}" stroke-opacity=".5"/>`;
-  g += `<text x="${fi.x+2}" y="${fi.y-6}" text-anchor="middle" style="font:600 16px var(--f-disp);fill:${css("--ink")}">FI</text>`;
-  const n = netImport();
-  g += `<text x="${fi.x+2}" y="${fi.y+12}" text-anchor="middle" style="fill:${css("--muted")}">netto ${n?(n.v>0?"tuonti ":"vienti ")+fmt(Math.abs(n.v)):"–"}</text>`;
-  for(const nd of nodes){
-    const p=L[nd.k], v=p?p.v:null, exp = v!=null && v>0;
+  const k=26, W=360, H=365;
+  const P=([lon,lat])=>({x:+(70+(lon-16)*Math.cos(64.5*Math.PI/180)*k).toFixed(1), y:+(26+(70.6-lat)*k).toFixed(1)});
+  const ink=css("--ink"), muted=css("--muted");
+  let g=`<path d="${FI_OUTLINE.map((c,i)=>{const q=P(c);return (i?"L":"M")+q.x+","+q.y;}).join("")}Z" fill="${css("--accent")}" fill-opacity=".12" stroke="${css("--accent")}" stroke-opacity=".6" stroke-linejoin="round"/>`;
+  const c=P([26.2,63.6]), n=netImport();
+  g += `<text x="${c.x}" y="${c.y-4}" text-anchor="middle" style="font:600 16px var(--f-disp);fill:${ink}">FI</text>`;
+  g += `<text x="${c.x}" y="${c.y+12}" text-anchor="middle" style="fill:${muted}">${n?(n.v>0?"tuonti ":"vienti ")+fmt(Math.abs(n.v)):"–"}</text>`;
+  for(const ln of LINKS){
+    const p=L[ln.k], v=p?p.v:null, exp=v!=null&&v>0;   // aineistoissa positiivinen = vienti Suomesta
     const col = v==null ? css("--oth") : exp ? css("--chp") : css("--hyd");
-    const w = v==null?1.5:Math.min(9,1.5+Math.abs(v)/250);
-    const a = {x:fi.x+(nd.x-fi.x)*0.28, y:fi.y+(nd.y-fi.y)*0.28}, b={x:nd.x+(fi.x-nd.x)*0.18,y:nd.y+(fi.y-nd.y)*0.18};
-    const [s,e] = exp ? [a,b] : [b,a];
-    g += `<line x1="${s.x}" y1="${s.y}" x2="${e.x}" y2="${e.y}" stroke="${col}" stroke-width="${w}" stroke-linecap="round" ${v!=null&&Math.abs(v)>5?'marker-end="url(#ah)"':''}/>`;
-    const ta = nd.x<fi.x ? "start":"middle", tx = nd.x<fi.x ? 4 : nd.x;
-    g += `<text x="${tx}" y="${nd.y-8}" text-anchor="${ta}" style="fill:${css("--muted")}">${nd.n}</text>`;
-    g += `<text x="${tx}" y="${nd.y+8}" text-anchor="${ta}" style="font:600 15px var(--f-mono);fill:${col}">${v==null?"–":(exp?"→ ":"← ")+fmt(Math.abs(v))}</text>`;
+    const w = v==null ? 1.5 : Math.min(7, 2+Math.abs(v)/400);
+    const A=P(ln.fi), B=P(ln.ext), [s,e]=exp?[A,B]:[B,A];
+    const dx=e.x-s.x, dy=e.y-s.y, len=Math.hypot(dx,dy), ux=dx/len, uy=dy/len, hl=11, hw=6+w/2;
+    const bx=e.x-ux*hl, by=e.y-uy*hl;
+    g += `<line x1="${s.x}" y1="${s.y}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}" stroke="${col}" stroke-width="${w}" stroke-linecap="round"/>`;
+    if(v!=null && Math.abs(v)>5) g += `<path d="M${e.x},${e.y}L${(bx-uy*hw).toFixed(1)},${(by+ux*hw).toFixed(1)}L${(bx+uy*hw).toFixed(1)},${(by-ux*hw).toFixed(1)}Z" fill="${col}"/>`;
+    const Lp=P(ln.lab), ta=ln.lab[2]; if(ta==="start") Lp.x=4;
+    g += `<text x="${Lp.x}" y="${Lp.y-8}" text-anchor="${ta}" style="fill:${muted}">${ln.n}</text>`;
+    g += `<text x="${Lp.x}" y="${Lp.y+9}" text-anchor="${ta}" style="font:600 15px var(--f-mono);fill:${col}">${v==null?"–":(exp?"vienti ":"tuonti ")+fmt(Math.abs(v))}</text>`;
   }
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Rajasiirrot">${g}</svg>
     <div class="legend"><span><i style="background:var(--chp)"></i>vienti Suomesta</span><span><i style="background:var(--hyd)"></i>tuonti Suomeen</span></div>`;
