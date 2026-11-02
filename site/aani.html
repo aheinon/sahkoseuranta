@@ -60,7 +60,7 @@
     <li><i style="background:var(--chp)"></i><b>Kellot</b> <span>tuonti ← · → vienti</span><span class="num" id="vI">–</span></li>
   </ul>
 </section>
-<p class="hmeta" id="audioState" role="status">Ääni ei ole vielä käynnissä. iPhonessa äänetön tila (sivukytkin) voi mykistää selaimen äänen.</p>
+<p class="hmeta" id="audioState" role="status">Paina Soita. (versio 3)</p>
 <div class="err" id="err"></div>
 <footer>Data: Fingrid avoin data (CC BY 4.0), porssisahko.net, sahkotin.fi. Aikakone käyttää vuorokausikeskiarvoja, joten siinä perussävel seuraa kulutusta taajuuden sijaan.</footer>
 </div>
@@ -213,17 +213,22 @@ function unlockIOS(){
   el.play().catch(()=>{}); A.unlock=el;
 }
 function audioStatus(msg){ $("audioState").textContent=msg; }
-$("play").onclick=async()=>{
+addEventListener("error",e=>audioStatus("Virhe: "+(e.message||e.error)));
+addEventListener("unhandledrejection",e=>audioStatus("Virhe: "+(e.reason&&e.reason.message||e.reason)));
+if(!(window.AudioContext||window.webkitAudioContext)) audioStatus("Tämä selain ei tue Web Audiota, joten ääni ei toimi tässä näkymässä. Avaa sivu Chromessa.");
+$("play").onclick=async()=>{ try{ await playClick(); }catch(e){ audioStatus("Äänen käynnistys epäonnistui: "+(e&&e.message||e)); console.error(e); } };
+async function playClick(){
+  audioStatus("Käynnistetään ääntä…");
   if(!A.frames.length){ audioStatus("Dataa ei ole ladattu, joten soitettavaa ei ole. Päivitä sivu."); return; }
-  if(A.playing){ stop(); return; }
+  if(A.playing){ stop(); audioStatus("Pysäytetty."); return; }
   if(!A.nodes) setup();
   unlockIOS();
-  try{ await A.nodes.ctx.resume(); }catch(e){}
+  try{ await A.nodes.ctx.resume(); }catch(e){ audioStatus("resume() epäonnistui: "+e.message); }
   audioStatus(A.nodes.ctx.state==="running" ? "Ääni käynnissä. Jos et kuule mitään, tarkista laitteen äänenvoimakkuus ja iPhonessa äänetön tila." : `Selain ei käynnistänyt ääntä (tila: ${A.nodes.ctx.state}). Kokeile painaa Soita uudelleen.`);
   A.nodes.master.gain.setTargetAtTime(+$("vol").value,A.nodes.ctx.currentTime,0.3);
   if(A.mode==="machine" && A.pos>=A.frames.length-1) A.pos=0;
   A.playing=true; last=performance.now(); $("play").textContent="❚❚ Pysäytä";
-};
+}
 $("vol").oninput=()=>{ if(A.nodes&&A.playing) A.nodes.master.gain.setTargetAtTime(+$("vol").value,A.nodes.ctx.currentTime,0.1); };
 $("mode").onchange=async()=>{ const was=A.playing; stop(); await load($("mode").value); if(was) $("play").click(); };
 $("scrub").oninput=()=>{ if(A.frames.length){ A.pos=+$("scrub").value/1000*(A.frames.length-1); readout(frameAt(A.pos)); } };
