@@ -219,6 +219,8 @@ async function refresh(){
 }
 
 const last = id => { const a=S.rt[id]; return a&&a.length ? a[a.length-1] : null; };
+// Fingrid 194: positiivinen = vienti. Käännetään nettotuonniksi (positiivinen = tuonti).
+const netImport = () => { const p=last(RT.net); return p ? {t:p.t, v:-p.v} : null; };
 const lastOf = (src,id) => { const a=src[id]; return a&&a.length ? a[a.length-1] : null; };
 function priceNow(){ const n=Date.now(); return S.prices.find(p=>p.t<=n && n<(p.e||p.t+9e5)); }
 const dayStart = (d=new Date()) => { const x=new Date(d); x.setHours(0,0,0,0); return +x; };
@@ -242,7 +244,7 @@ function renderStatus(){
 
 function setTile(id,html,note){ $(id).innerHTML = html; if(note!=null) $(id+"-n").textContent = note; }
 function renderTiles(){
-  const c=last(RT.cons), p=last(RT.prod), n=last(RT.net), co=last(RT.co2c);
+  const c=last(RT.cons), p=last(RT.prod), n=netImport(), co=last(RT.co2c);
   setTile("t-cons", c?`${fmt(c.v)}<small>MW</small>`:"–", c?"klo "+hhmm(c.t):" ");
   setTile("t-prod", p?`${fmt(p.v)}<small>MW</small>`:"–", p&&c ? `omavaraisuus ${fmt(p.v/c.v*100)} %` : " ");
   setTile("t-net", n?`${n.v>0?"+":"−"}${fmt(Math.abs(n.v))}<small>MW</small>`:"–", n ? (n.v>0?"tuontia":"vientiä") : " ");
@@ -323,7 +325,7 @@ function renderFlows(){
   let g=`<defs><marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10Z" fill="context-stroke"/></marker></defs>`;
   g += `<path d="M205,40 L265,55 L285,110 L300,190 L285,265 L240,290 L190,282 L170,240 L180,170 L175,110 Z" fill="${css("--accent")}" fill-opacity=".12" stroke="${css("--accent")}" stroke-opacity=".5"/>`;
   g += `<text x="${fi.x+2}" y="${fi.y-6}" text-anchor="middle" style="font:600 16px var(--f-disp);fill:${css("--ink")}">FI</text>`;
-  const n = last(RT.net);
+  const n = netImport();
   g += `<text x="${fi.x+2}" y="${fi.y+12}" text-anchor="middle" style="fill:${css("--muted")}">netto ${n?(n.v>0?"tuonti ":"vienti ")+fmt(Math.abs(n.v)):"–"}</text>`;
   for(const nd of nodes){
     const p=L[nd.k], v=p?p.v:null, exp = v!=null && v>0;
@@ -443,7 +445,7 @@ function renderHist(){
 
 function renderInsights(){
   const out=[]; const add=(t,sev="--accent")=>out.push(`<li style="--sev:var(${sev})">${t}</li>`);
-  const w=last(RT.wind), cap=lastOf(S.fc,FC.windCap), nuc=last(RT.nuc), n=last(RT.net), c=last(RT.cons), f=last(RT.freq), now=Date.now();
+  const w=last(RT.wind), cap=lastOf(S.fc,FC.windCap), nuc=last(RT.nuc), n=netImport(), c=last(RT.cons), f=last(RT.freq), now=Date.now();
   if(f && Math.abs(f.v-50)>0.1) add(`Taajuus ${fmt(f.v,3)} Hz poikkeaa normaalialueesta (49,9–50,1 Hz).`,"--bad");
   const nucOut = S.umm.filter(u=>u.kind==="ydin" && u.start<=now && (!u.stop||u.stop>now) && (u.unavailable||0)>0);
   const nucSoon = S.umm.filter(u=>u.kind==="ydin" && u.start>now && u.start<now+7*864e5);
